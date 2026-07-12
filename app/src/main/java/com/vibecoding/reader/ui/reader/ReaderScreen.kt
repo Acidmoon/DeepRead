@@ -62,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -125,6 +126,16 @@ fun ReaderScreen(
             if (currentPosition.isNotBlank()) {
                 viewModel.saveProgressNow(currentPosition, currentProgress)
             }
+        }
+    }
+
+    // 自动翻页时禁止息屏；关闭自动翻页或离开阅读页后恢复系统休眠策略
+    val view = LocalView.current
+    DisposableEffect(settings.autoPageTurnEnabled, view) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = settings.autoPageTurnEnabled
+        onDispose {
+            view.keepScreenOn = previous
         }
     }
 
