@@ -16,6 +16,7 @@ import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.EbookBlock
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.TocEntry
+import com.vibecoding.reader.domain.reader.BookLoadGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,11 +28,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.TimeoutException
 
 data class ReaderContentState(
     val loading: Boolean = true,
+    val loadingMessage: String? = null,
     val error: String? = null,
     val text: String = "",
     val toc: List<TocEntry> = emptyList(),
@@ -65,13 +69,21 @@ class ReaderViewModel(
     val jumpPosition: StateFlow<String?> = _jumpPosition.asStateFlow()
 
     private var progressJob: Job? = null
+    private var loadJob: Job? = null
     private var lastSavedPosition: String? = null
 
     init {
-        viewModelScope.launch {
+        reload()
+    }
+
+    fun reload() {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             val b = bookRepository.getBook(bookId)
             if (b == null) {
-                _content.update { it.copy(loading = false, error = "书籍不存在") }
+                _content.update {
+                    it.copy(loading = false, loadingMessage = null, error = "书籍不存在")
+                }
                 return@launch
             }
             loadContent(b)
@@ -79,65 +91,90 @@ class ReaderViewModel(
     }
 
     private suspend fun loadContent(book: Book) {
-        _content.update { it.copy(loading = true, error = null) }
+        val file = File(book.localPath)
+        val size = BookLoadGuard.fileSize(file)
+        val pre = BookLoadGuard.precheck(file)
+        if (pre != null) {
+            _content.update {
+                it.copy(loading = false, loadingMessage = null, error = pre)
+            }
+            return
+        }
+
+        _content.update {
+            it.copy(
+                loading = true,
+                loadingMessage = BookLoadGuard.loadingMessage(size),
+                error = null
+            )
+        }
+
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                val file = File(book.localPath)
-                if (!file.exists()) error("本地文件丢失，请重新导入")
-                val cachedToc = BookImporter.loadToc(appContext, book.id)
-                when {
-                    book.format.isEbook -> {
-                        val bookDir = file.parentFile
-                        val doc = EbookLoader.load(book.format, file, bookDir)
-                        val toc = cachedToc.ifEmpty {
-                            doc.toc.also {
-                                BookImporter.saveTocForBook(appContext, book.id, it)
+                withTimeout(BookLoadGuard.LOAD_TIMEOUT_MS) {
+                    val cachedToc = BookImporter.loadToc(appContext, book.id)
+                    when {
+                        book.format.isEbook -> {
+                            val bookDir = file.parentFile
+                            val doc = EbookLoader.load(book.format, file, bookDir)
+                            val toc = cachedToc.ifEmpty {
+                                doc.toc.also {
+                                    BookImporter.saveTocForBook(appContext, book.id, it)
+                                }
                             }
-                        }
-                        // 勿用 original 等本地文件名覆盖已有书名；仅补作者/更优元数据标题
-                        val metaTitle = doc.title?.trim().orEmpty()
-                        val betterTitle = metaTitle.isNotBlank() &&
-                            !metaTitle.equals("original", ignoreCase = true) &&
-                            (book.title.equals("original", ignoreCase = true) ||
-                                book.title == "未命名文档")
-                        if (betterTitle ||
-                            (!doc.author.isNullOrBlank() && book.author.isNullOrBlank())
-                        ) {
-                            bookRepository.upsert(
-                                book.copy(
-                                    title = if (betterTitle) metaTitle else book.title,
-                                    author = doc.author ?: book.author,
-                                    updatedAt = System.currentTimeMillis()
-                                )
-                            )
-                        }
-                        LoadedContent(doc.plainText, toc, doc.markdownSource, doc.blocks)
-                    }
-                    book.format == BookFormat.PDF -> {
-                        val toc = cachedToc.ifEmpty {
-                            PdfOutlineParser.ensureInitialized(appContext)
-                            val pageCount = runCatching {
-                                android.graphics.pdf.PdfRenderer(
-                                    android.os.ParcelFileDescriptor.open(
-                                        file,
-                                        android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                            val metaTitle = doc.title?.trim().orEmpty()
+                            val betterTitle = metaTitle.isNotBlank() &&
+                                !metaTitle.equals("original", ignoreCase = true) &&
+                                (book.title.equals("original", ignoreCase = true) ||
+                                    book.title == "未命名文档")
+                            if (betterTitle ||
+                                (!doc.author.isNullOrBlank() && book.author.isNullOrBlank())
+                            ) {
+                                bookRepository.upsert(
+                                    book.copy(
+                                        title = if (betterTitle) metaTitle else book.title,
+                                        author = doc.author ?: book.author,
+                                        updatedAt = System.currentTimeMillis()
                                     )
-                                ).use { it.pageCount }
-                            }.getOrDefault(0)
-                            PdfOutlineParser.parseOutline(file, pageCount).also {
-                                BookImporter.saveTocForBook(appContext, book.id, it)
+                                )
                             }
+                            LoadedContent(doc.plainText, toc, doc.markdownSource, doc.blocks)
                         }
-                        LoadedContent("", toc, null, emptyList())
+                        book.format == BookFormat.PDF -> {
+                            // PDF 正文由 PdfRenderer 渲染；此处仅元数据/目录，避免整本读入
+                            val toc = cachedToc.ifEmpty {
+                                PdfOutlineParser.ensureInitialized(appContext)
+                                val pageCount = runCatching {
+                                    android.graphics.pdf.PdfRenderer(
+                                        android.os.ParcelFileDescriptor.open(
+                                            file,
+                                            android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                                        )
+                                    ).use { it.pageCount }
+                                }.getOrDefault(0)
+                                PdfOutlineParser.parseOutline(file, pageCount).also {
+                                    BookImporter.saveTocForBook(appContext, book.id, it)
+                                }
+                            }
+                            LoadedContent("", toc, null, emptyList())
+                        }
+                        else -> error("不支持的格式")
                     }
-                    else -> error("不支持的格式")
                 }
+            }.recoverCatching { e ->
+                if (e is kotlinx.coroutines.TimeoutCancellationException) {
+                    throw TimeoutException("加载超时")
+                }
+                throw e
             }
         }
+
         result.onSuccess { loaded ->
             _content.update {
                 it.copy(
                     loading = false,
+                    loadingMessage = null,
+                    error = null,
                     text = loaded.text,
                     toc = loaded.toc,
                     initialPosition = book.lastPosition,
@@ -147,7 +184,11 @@ class ReaderViewModel(
             }
         }.onFailure { e ->
             _content.update {
-                it.copy(loading = false, error = e.message ?: "加载失败")
+                it.copy(
+                    loading = false,
+                    loadingMessage = null,
+                    error = BookLoadGuard.classifyError(e)
+                )
             }
         }
     }

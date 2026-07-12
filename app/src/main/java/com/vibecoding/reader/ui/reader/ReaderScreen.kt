@@ -144,12 +144,38 @@ fun ReaderScreen(
             when {
                 content.loading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                content.loadingMessage ?: "正在打开…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            )
+                        }
                     }
                 }
                 content.error != null -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(content.error ?: "错误")
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(32.dp)
+                        ) {
+                            Text(
+                                content.error ?: "打开失败",
+                                style = MaterialTheme.typography.titleMedium,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            TextButton(onClick = { viewModel.reload() }) {
+                                Text("重试")
+                            }
+                            TextButton(onClick = onBack) {
+                                Text("返回")
+                            }
+                        }
                     }
                 }
                 book == null -> {
