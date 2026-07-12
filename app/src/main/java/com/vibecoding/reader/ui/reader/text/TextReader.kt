@@ -35,9 +35,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vibecoding.reader.domain.model.EbookBlock
 import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
@@ -59,8 +61,28 @@ fun TextReader(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 富内容块（含图片）；非空时优先用 RichEbookReader */
+    blocks: List<EbookBlock> = emptyList(),
+    @Suppress("UNUSED_PARAMETER")
+    markdownSource: String? = null
 ) {
+    // MD / EPUB 等带结构或图片的内容走富阅读器
+    if (blocks.isNotEmpty()) {
+        RichEbookReader(
+            blocks = blocks,
+            plainText = text,
+            settings = settings,
+            initialPosition = initialPosition,
+            jumpPosition = jumpPosition,
+            onJumpConsumed = onJumpConsumed,
+            onProgress = onProgress,
+            onToggleChrome = onToggleChrome,
+            modifier = modifier
+        )
+        return
+    }
+
     if (settings.pageTurnMode == PageTurnMode.VERTICAL) {
         VerticalScrollReader(
             text = text,

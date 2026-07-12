@@ -71,6 +71,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     // PDF outline / metadata only; rendering uses Android PdfRenderer
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")

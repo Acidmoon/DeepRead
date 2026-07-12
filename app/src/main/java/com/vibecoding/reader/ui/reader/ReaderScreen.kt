@@ -145,7 +145,7 @@ fun ReaderScreen(
                 else -> {
                     Box(Modifier.fillMaxSize()) {
                         when (book!!.format) {
-                            BookFormat.TXT, BookFormat.DOCX -> {
+                            BookFormat.TXT, BookFormat.MD, BookFormat.EPUB, BookFormat.DOCX -> {
                                 TextReader(
                                     text = content.text,
                                     toc = content.toc,
@@ -159,7 +159,9 @@ fun ReaderScreen(
                                         viewModel.saveProgress(pos, progress)
                                     },
                                     onToggleChrome = { showChrome = !showChrome },
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize(),
+                                    blocks = content.blocks,
+                                    markdownSource = content.markdownSource
                                 )
                             }
                             BookFormat.PDF -> {
@@ -199,8 +201,8 @@ fun ReaderScreen(
 
                             // 底栏：上一章 / 下一章 + 目录 · 书签 · 设置
                             ReaderBottomChrome(
-                                hasChapters = book!!.format != BookFormat.PDF &&
-                                    content.toc.count { it.kind == TocKind.CHAPTER } >= 2,
+                                hasChapters = book!!.format.isEbook &&
+                                    content.toc.size >= 2,
                                 canPrevChapter = chapterNav.prev != null,
                                 canNextChapter = chapterNav.next != null,
                                 onPrevChapter = {

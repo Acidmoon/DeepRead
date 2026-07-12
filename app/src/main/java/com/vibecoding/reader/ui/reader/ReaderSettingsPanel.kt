@@ -48,9 +48,10 @@ fun ReaderSettingsPanel(
     onChange: (ReadingSettings) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    when (format) {
-        BookFormat.PDF -> PdfSettingsPanel(settings, onChange, modifier)
-        BookFormat.TXT, BookFormat.DOCX -> TextSettingsPanel(settings, onChange, modifier)
+    if (format.isEbook) {
+        TextSettingsPanel(settings, onChange, modifier)
+    } else {
+        PdfSettingsPanel(settings, onChange, modifier)
     }
 }
 
@@ -163,7 +164,13 @@ private fun TextSettingsPanel(
             .fillMaxWidth()
             .padding(20.dp)
     ) {
-        Text("文本设置", style = MaterialTheme.typography.titleMedium)
+        Text("电子书设置", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "适用于 TXT / Markdown / EPUB / Word，支持重排与主题。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
         Spacer(Modifier.height(16.dp))
 
         Text("背景", style = MaterialTheme.typography.labelLarge)
@@ -239,10 +246,10 @@ private fun TextSettingsPanel(
                     label = {
                         Text(
                             when (mode) {
+                                PageTurnMode.VERTICAL -> "上下滚动"
                                 PageTurnMode.TAP -> "点按翻页"
                                 PageTurnMode.SLIDE -> "左右滑动"
                                 PageTurnMode.BOTH -> "点按+左右滑"
-                                PageTurnMode.VERTICAL -> "上下滚动"
                             }
                         )
                     }

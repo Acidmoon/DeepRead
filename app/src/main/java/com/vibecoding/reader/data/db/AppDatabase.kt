@@ -5,20 +5,23 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.vibecoding.reader.domain.model.PageTurnMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @Database(
     entities = [
+        FolderEntity::class,
         BookEntity::class,
         BookmarkEntity::class,
         ReadingSettingsEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun folderDao(): FolderDao
     abstract fun bookDao(): BookDao
     abstract fun bookmarkDao(): BookmarkDao
     abstract fun settingsDao(): SettingsDao
@@ -34,7 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "reader.db"
                 )
-                    // v2 增加 PDF 独立设置字段；MVP 直接重建本地库
+                    // v3：书架文件夹；MVP 直接重建
                     .fallbackToDestructiveMigration()
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
@@ -43,8 +46,14 @@ abstract class AppDatabase : RoomDatabase() {
                     }).build().also { built ->
                         instance = built
                         CoroutineScope(Dispatchers.IO).launch {
-                            if (built.settingsDao().get() == null) {
+                            val existing = built.settingsDao().get()
+                            if (existing == null) {
                                 built.settingsDao().upsert(ReadingSettingsEntity.default())
+                            } else if (existing.pageTurnMode == PageTurnMode.BOTH.name) {
+                                // 产品默认改为上下滚动：迁移旧版默认 BOTH
+                                built.settingsDao().upsert(
+                                    existing.copy(pageTurnMode = PageTurnMode.VERTICAL.name)
+                                )
                             }
                         }
                     }

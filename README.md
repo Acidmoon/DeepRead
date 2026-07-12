@@ -5,10 +5,11 @@
 ## 功能
 
 - **书架**：SAF 导入、网格展示、长按删除、阅读进度
-- **格式**：TXT（编码启发式）、PDF（PdfRenderer）、DOCX（轻量 OOXML 解析）
-- **目录**：TXT 章节启发式 / DOCX Heading / PDF Outline（失败则页码列表）
-- **书签**：按位置收藏与跳转
-- **文本设置**：背景主题、字号、行距、点按/滑动翻页
+- **电子书**（统一重排阅读）：TXT / Markdown / EPUB / DOCX  
+  - MD：标题目录 + 上下滚动富渲染  
+  - EPUB：spine 正文 + nav/ncx 目录，可选内嵌封面  
+- **版式文档**：PDF（全屏渲染、独立设置）
+- **目录 / 书签 / 封面**：导入预生成，旧书自动补齐
 - **同步预留**：`SyncPort` + `remoteId` / `updatedAt` 字段
 
 ## 环境

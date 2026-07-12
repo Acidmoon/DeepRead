@@ -5,12 +5,40 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.vibecoding.reader.domain.model.Book
+import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReadingSettings
 
-@Entity(tableName = "books")
+@Entity(tableName = "folders")
+data class FolderEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val addedAt: Long,
+    val updatedAt: Long
+) {
+    fun toDomain() = BookFolder(
+        id = id,
+        name = name,
+        addedAt = addedAt,
+        updatedAt = updatedAt
+    )
+
+    companion object {
+        fun fromDomain(folder: BookFolder) = FolderEntity(
+            id = folder.id,
+            name = folder.name,
+            addedAt = folder.addedAt,
+            updatedAt = folder.updatedAt
+        )
+    }
+}
+
+@Entity(
+    tableName = "books",
+    indices = [Index("folderId")]
+)
 data class BookEntity(
     @PrimaryKey val id: String,
     val title: String,
@@ -24,7 +52,8 @@ data class BookEntity(
     val lastPosition: String,
     val progressPercent: Float,
     val remoteId: String?,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val folderId: String? = null
 ) {
     fun toDomain(): Book = Book(
         id = id,
@@ -39,7 +68,8 @@ data class BookEntity(
         lastPosition = lastPosition,
         progressPercent = progressPercent,
         remoteId = remoteId,
-        updatedAt = updatedAt
+        updatedAt = updatedAt,
+        folderId = folderId
     )
 
     companion object {
@@ -56,7 +86,8 @@ data class BookEntity(
             lastPosition = book.lastPosition,
             progressPercent = book.progressPercent,
             remoteId = book.remoteId,
-            updatedAt = book.updatedAt
+            updatedAt = book.updatedAt,
+            folderId = book.folderId
         )
     }
 }

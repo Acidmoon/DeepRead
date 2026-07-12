@@ -5,16 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.vibecoding.reader.data.import.BookImporter
-import com.vibecoding.reader.data.parser.DocxParser
+import com.vibecoding.reader.data.parser.EbookLoader
 import com.vibecoding.reader.data.parser.PdfOutlineParser
-import com.vibecoding.reader.data.parser.TxtParser
 import com.vibecoding.reader.data.repo.BookRepository
 import com.vibecoding.reader.data.repo.BookmarkRepository
 import com.vibecoding.reader.data.repo.SettingsRepository
 import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.Bookmark
-import com.vibecoding.reader.domain.model.ReaderPosition
+import com.vibecoding.reader.domain.model.EbookBlock
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.TocEntry
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +35,10 @@ data class ReaderContentState(
     val error: String? = null,
     val text: String = "",
     val toc: List<TocEntry> = emptyList(),
-    val initialPosition: String = ""
+    val initialPosition: String = "",
+    val markdownSource: String? = null,
+    /** 富内容（标题/段落/图片等） */
+    val blocks: List<EbookBlock> = emptyList()
 )
 
 class ReaderViewModel(
@@ -82,30 +84,37 @@ class ReaderViewModel(
             runCatching {
                 val file = File(book.localPath)
                 if (!file.exists()) error("本地文件丢失，请重新导入")
-                // 打开时预加载目录：命中版本化缓存则直接用，否则解析并写回，保证打开「目录」瞬时可用
                 val cachedToc = BookImporter.loadToc(appContext, book.id)
-                when (book.format) {
-                    BookFormat.TXT -> {
-                        val text = TxtParser.readText(file)
-                        val toc = cachedToc.ifEmpty {
-                            TxtParser.buildToc(text).also {
-                                BookImporter.saveTocForBook(appContext, book.id, it)
-                            }
-                        }
-                        text to toc
-                    }
-                    BookFormat.DOCX -> {
-                        val doc = DocxParser.parse(file)
+                when {
+                    book.format.isEbook -> {
+                        val bookDir = file.parentFile
+                        val doc = EbookLoader.load(book.format, file, bookDir)
                         val toc = cachedToc.ifEmpty {
                             doc.toc.also {
                                 BookImporter.saveTocForBook(appContext, book.id, it)
                             }
                         }
-                        doc.plainText to toc
+                        // 勿用 original 等本地文件名覆盖已有书名；仅补作者/更优元数据标题
+                        val metaTitle = doc.title?.trim().orEmpty()
+                        val betterTitle = metaTitle.isNotBlank() &&
+                            !metaTitle.equals("original", ignoreCase = true) &&
+                            (book.title.equals("original", ignoreCase = true) ||
+                                book.title == "未命名文档")
+                        if (betterTitle ||
+                            (!doc.author.isNullOrBlank() && book.author.isNullOrBlank())
+                        ) {
+                            bookRepository.upsert(
+                                book.copy(
+                                    title = if (betterTitle) metaTitle else book.title,
+                                    author = doc.author ?: book.author,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                        LoadedContent(doc.plainText, toc, doc.markdownSource, doc.blocks)
                     }
-                    BookFormat.PDF -> {
+                    book.format == BookFormat.PDF -> {
                         val toc = cachedToc.ifEmpty {
-                            // 无缓存时解析 outline 并落盘
                             PdfOutlineParser.ensureInitialized(appContext)
                             val pageCount = runCatching {
                                 android.graphics.pdf.PdfRenderer(
@@ -119,18 +128,21 @@ class ReaderViewModel(
                                 BookImporter.saveTocForBook(appContext, book.id, it)
                             }
                         }
-                        "" to toc
+                        LoadedContent("", toc, null, emptyList())
                     }
+                    else -> error("不支持的格式")
                 }
             }
         }
-        result.onSuccess { (text, toc) ->
+        result.onSuccess { loaded ->
             _content.update {
                 it.copy(
                     loading = false,
-                    text = text,
-                    toc = toc,
-                    initialPosition = book.lastPosition
+                    text = loaded.text,
+                    toc = loaded.toc,
+                    initialPosition = book.lastPosition,
+                    markdownSource = loaded.markdownSource,
+                    blocks = loaded.blocks
                 )
             }
         }.onFailure { e ->
@@ -140,9 +152,6 @@ class ReaderViewModel(
         }
     }
 
-    /**
-     * 防抖写入进度，避免左右翻页时频繁打库导致卡顿。
-     */
     fun saveProgress(position: String, progress: Float) {
         if (position == lastSavedPosition) return
         progressJob?.cancel()
@@ -204,6 +213,13 @@ class ReaderViewModel(
         val end = (start + maxLen).coerceAtMost(text.length)
         return text.substring(start, end).replace('\n', ' ').trim().ifBlank { "书签" }
     }
+
+    private data class LoadedContent(
+        val text: String,
+        val toc: List<TocEntry>,
+        val markdownSource: String?,
+        val blocks: List<EbookBlock>
+    )
 
     class Factory(
         private val bookId: String,

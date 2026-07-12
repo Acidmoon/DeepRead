@@ -10,8 +10,8 @@ import android.os.ParcelFileDescriptor
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
-import com.vibecoding.reader.data.parser.DocxParser
-import com.vibecoding.reader.data.parser.TxtParser
+import com.vibecoding.reader.data.parser.EbookLoader
+import com.vibecoding.reader.data.parser.EpubParser
 import com.vibecoding.reader.domain.model.BookFormat
 import java.io.File
 import java.io.FileOutputStream
@@ -19,8 +19,9 @@ import java.io.FileOutputStream
 /**
  * 书架封面生成：
  * - 已有 cover.jpg 则复用
- * - PDF：渲染第一页为 cover.jpg
- * - TXT / DOCX：写入正文节选 cover_excerpt.txt，并生成简易封面图 cover.jpg
+ * - PDF：渲染第一页
+ * - EPUB：优先提取内嵌封面，否则正文节选封面
+ * - TXT / MD / DOCX：正文节选 + 书页风封面图
  */
 object CoverGenerator {
 
@@ -69,27 +70,48 @@ object CoverGenerator {
                     excerpt = null
                 )
             }
-            BookFormat.TXT -> {
-                val text = runCatching { TxtParser.readText(localFile) }.getOrDefault("")
-                val excerpt = buildExcerpt(text)
-                writeExcerpt(excerptOut, excerpt)
-                val ok = renderTextCover(title, excerpt, cover, format)
-                CoverResult(
-                    coverPath = if (ok) cover.absolutePath else null,
-                    excerpt = excerpt
-                )
+            BookFormat.EPUB -> {
+                val parsed = runCatching { EpubParser.parse(localFile) }.getOrNull()
+                val fromEpub = parsed?.coverEntryName?.let { entry ->
+                    EpubParser.extractCover(localFile, entry, cover)
+                } == true
+                if (fromEpub) {
+                    val excerpt = buildExcerpt(parsed?.document?.plainText.orEmpty())
+                    writeExcerpt(excerptOut, excerpt)
+                    CoverResult(cover.absolutePath, excerpt)
+                } else {
+                    textStyleCover(
+                        title = title,
+                        text = parsed?.document?.plainText.orEmpty(),
+                        cover = cover,
+                        excerptOut = excerptOut,
+                        format = format
+                    )
+                }
             }
-            BookFormat.DOCX -> {
-                val text = runCatching { DocxParser.parse(localFile).plainText }.getOrDefault("")
-                val excerpt = buildExcerpt(text)
-                writeExcerpt(excerptOut, excerpt)
-                val ok = renderTextCover(title, excerpt, cover, format)
-                CoverResult(
-                    coverPath = if (ok) cover.absolutePath else null,
-                    excerpt = excerpt
-                )
+            BookFormat.TXT, BookFormat.MD, BookFormat.DOCX -> {
+                val text = runCatching {
+                    EbookLoader.load(format, localFile).plainText
+                }.getOrDefault("")
+                textStyleCover(title, text, cover, excerptOut, format)
             }
         }
+    }
+
+    private fun textStyleCover(
+        title: String,
+        text: String,
+        cover: File,
+        excerptOut: File,
+        format: BookFormat
+    ): CoverResult {
+        val excerpt = buildExcerpt(text)
+        writeExcerpt(excerptOut, excerpt)
+        val ok = renderTextCover(title, excerpt, cover, format)
+        return CoverResult(
+            coverPath = if (ok) cover.absolutePath else null,
+            excerpt = excerpt
+        )
     }
 
     fun loadExcerpt(bookDir: File?): String? {
@@ -165,6 +187,8 @@ object CoverGenerator {
 
             val bg = when (format) {
                 BookFormat.TXT -> intArrayOf(0xFFEEF4FF.toInt(), 0xFFD6E6FF.toInt())
+                BookFormat.MD -> intArrayOf(0xFFF3EEFF.toInt(), 0xFFE4D9FF.toInt())
+                BookFormat.EPUB -> intArrayOf(0xFFFFF1E8.toInt(), 0xFFFFDCC8.toInt())
                 BookFormat.DOCX -> intArrayOf(0xFFE8F7FC.toInt(), 0xFFCDECF7.toInt())
                 else -> intArrayOf(0xFFF5F5F5.toInt(), 0xFFE0E0E0.toInt())
             }
@@ -187,6 +211,8 @@ object CoverGenerator {
             val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = when (format) {
                     BookFormat.TXT -> 0xFF2563EB.toInt()
+                    BookFormat.MD -> 0xFF7C3AED.toInt()
+                    BookFormat.EPUB -> 0xFFEA580C.toInt()
                     BookFormat.DOCX -> 0xFF0284C7.toInt()
                     else -> 0xFF64748B.toInt()
                 }
@@ -243,7 +269,7 @@ object CoverGenerator {
                 typeface = Typeface.DEFAULT_BOLD
                 textAlign = Paint.Align.CENTER
             }
-            val label = format.name
+            val label = format.displayLabel
             val bw = 72f
             val bh = 32f
             val bx = right - bw - 12f

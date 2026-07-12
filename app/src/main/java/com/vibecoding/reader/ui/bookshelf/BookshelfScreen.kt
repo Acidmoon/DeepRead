@@ -11,28 +11,38 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -60,24 +70,52 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vibecoding.reader.data.import.CoverGenerator
 import com.vibecoding.reader.domain.model.Book
+import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.BookFormat
+import com.vibecoding.reader.domain.model.ShelfItem
 import java.io.File
+
+private val importMimeTypes = arrayOf(
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "application/epub+zip",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+    "*/*"
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookshelfScreen(
     viewModel: BookshelfViewModel,
-    onOpenBook: (String) -> Unit
+    onOpenBook: (String) -> Unit,
+    onOpenFolder: (String) -> Unit,
+    onBackFromFolder: (() -> Unit)? = null,
+    rootFolders: List<BookFolder> = emptyList(),
+    /** 嵌入首页 Tab 时：根书架不显示独立顶栏（由首页 Tab 顶栏替代） */
+    embeddedInHome: Boolean = false
 ) {
-    val books by viewModel.books.collectAsStateWithLifecycle()
+    val shelfItems by viewModel.shelfItems.collectAsStateWithLifecycle()
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    var pendingDelete by remember { mutableStateOf<Book?>(null) }
+
+    var pendingDeleteBook by remember { mutableStateOf<Book?>(null) }
+    var pendingFolderAction by remember { mutableStateOf<BookFolder?>(null) }
+    var showCreateFolder by remember { mutableStateOf(false) }
+    var renameFolder by remember { mutableStateOf<BookFolder?>(null) }
+    var moveBook by remember { mutableStateOf<Book?>(null) }
+    var fabMenu by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        viewModel.import(uris)
+    ) { uris -> viewModel.import(uris) }
+
+    val treePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.importFromTree(uri)
     }
 
     LaunchedEffect(ui.message) {
@@ -87,36 +125,86 @@ fun BookshelfScreen(
         }
     }
 
+    val inFolder = ui.currentFolderId != null
+
+    val showTopBar = inFolder || !embeddedInHome
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("我的书架", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "本地阅读 · 平板优化",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            if (showTopBar) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                if (inFolder) ui.currentFolderName ?: "文件夹"
+                                else "我的书架",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                if (inFolder) "文件夹内 · 可继续导入"
+                                else "本地阅读 · 文件夹与电子书",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        if (inFolder && onBackFromFolder != null) {
+                            IconButton(onClick = onBackFromFolder) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "返回书架"
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+        },
+        floatingActionButton = {
+            Box {
+                FloatingActionButton(onClick = { fabMenu = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "添加")
+                }
+                DropdownMenu(expanded = fabMenu, onDismissRequest = { fabMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("导入文件") },
+                        onClick = {
+                            fabMenu = false
+                            picker.launch(importMimeTypes)
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (inFolder) "从系统文件夹导入到此处"
+                                else "从系统文件夹导入"
+                            )
+                        },
+                        onClick = {
+                            fabMenu = false
+                            treePicker.launch(null)
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        }
+                    )
+                    if (!inFolder) {
+                        DropdownMenuItem(
+                            text = { Text("新建空文件夹") },
+                            onClick = {
+                                fabMenu = false
+                                showCreateFolder = true
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.CreateNewFolder, contentDescription = null)
+                            }
                         )
                     }
                 }
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    picker.launch(
-                        arrayOf(
-                            "text/plain",
-                            "application/pdf",
-                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            "application/msword",
-                            "*/*"
-                        )
-                    )
-                }
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "导入书籍")
             }
         },
         snackbarHost = { SnackbarHost(snackbar) }
@@ -126,19 +214,14 @@ fun BookshelfScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (books.isEmpty() && !ui.isImporting) {
+            if (shelfItems.isEmpty() && !ui.isImporting) {
                 EmptyBookshelf(
+                    inFolder = inFolder,
                     modifier = Modifier.align(Alignment.Center),
-                    onImport = {
-                        picker.launch(
-                            arrayOf(
-                                "text/plain",
-                                "application/pdf",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                "*/*"
-                            )
-                        )
-                    }
+                    onImport = { picker.launch(importMimeTypes) },
+                    onCreateFolder = if (!inFolder) {
+                        { showCreateFolder = true }
+                    } else null
                 )
             } else {
                 LazyVerticalGrid(
@@ -148,12 +231,38 @@ fun BookshelfScreen(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(books, key = { it.id }) { book ->
-                        BookCard(
-                            book = book,
-                            onClick = { onOpenBook(book.id) },
-                            onLongClick = { pendingDelete = book }
-                        )
+                    items(
+                        shelfItems,
+                        key = {
+                            when (it) {
+                                is ShelfItem.Folder -> "f-${it.folder.id}"
+                                is ShelfItem.BookItem -> "b-${it.book.id}"
+                            }
+                        }
+                    ) { item ->
+                        when (item) {
+                            is ShelfItem.Folder -> {
+                                FolderCard(
+                                    item = item,
+                                    onClick = { onOpenFolder(item.folder.id) },
+                                    onLongClick = { pendingFolderAction = item.folder }
+                                )
+                            }
+                            is ShelfItem.BookItem -> {
+                                ShelfBookCard(
+                                    book = item.book,
+                                    onClick = { onOpenBook(item.book.id) },
+                                    onLongClick = {
+                                        // 根目录长按：删除 / 移入文件夹；文件夹内：删除 / 移出
+                                        pendingDeleteBook = item.book
+                                    },
+                                    onMove = {
+                                        moveBook = item.book
+                                    },
+                                    showMove = true
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -180,58 +289,361 @@ fun BookshelfScreen(
         }
     }
 
-    pendingDelete?.let { book ->
+    // 删除书籍
+    pendingDeleteBook?.let { book ->
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除书籍") },
-            text = { Text("确定删除「${book.title}」？书签与本地副本将一并清除。") },
+            onDismissRequest = { pendingDeleteBook = null },
+            title = { Text(book.title) },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        moveBook = book
+                        pendingDeleteBook = null
+                    }) { Text(if (inFolder) "移出文件夹 / 移动…" else "移入文件夹…") }
+                    Text("或删除此书？书签与本地副本将一并清除。")
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.delete(book)
-                    pendingDelete = null
+                    pendingDeleteBook = null
                 }) { Text("删除") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = { pendingDeleteBook = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // 文件夹操作
+    pendingFolderAction?.let { folder ->
+        AlertDialog(
+            onDismissRequest = { pendingFolderAction = null },
+            title = { Text(folder.name) },
+            text = { Text("管理此文件夹") },
+            confirmButton = {
+                TextButton(onClick = {
+                    renameFolder = folder
+                    pendingFolderAction = null
+                }) { Text("重命名") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        viewModel.deleteFolder(folder, deleteBooks = false)
+                        pendingFolderAction = null
+                    }) { Text("删除(书籍保留)") }
+                    TextButton(onClick = {
+                        viewModel.deleteFolder(folder, deleteBooks = true)
+                        pendingFolderAction = null
+                    }) { Text("删除全部") }
+                    TextButton(onClick = { pendingFolderAction = null }) { Text("取消") }
+                }
+            }
+        )
+    }
+
+    if (showCreateFolder) {
+        FolderNameDialog(
+            title = "新建文件夹",
+            initial = "",
+            onDismiss = { showCreateFolder = false },
+            onConfirm = {
+                viewModel.createFolder(it)
+                showCreateFolder = false
+            }
+        )
+    }
+
+    renameFolder?.let { folder ->
+        FolderNameDialog(
+            title = "重命名文件夹",
+            initial = folder.name,
+            onDismiss = { renameFolder = null },
+            onConfirm = {
+                viewModel.renameFolder(folder, it)
+                renameFolder = null
+            }
+        )
+    }
+
+    moveBook?.let { book ->
+        MoveBookDialog(
+            book = book,
+            folders = rootFolders,
+            currentFolderId = ui.currentFolderId,
+            onDismiss = { moveBook = null },
+            onMove = { targetId ->
+                viewModel.moveBookToFolder(book, targetId)
+                moveBook = null
             }
         )
     }
 }
 
 @Composable
+private fun FolderNameDialog(
+    title: String,
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = { Text("名称") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank()
+            ) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+@Composable
+private fun MoveBookDialog(
+    book: Book,
+    folders: List<BookFolder>,
+    currentFolderId: String?,
+    onDismiss: () -> Unit,
+    onMove: (String?) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移动「${book.title}」") },
+        text = {
+            Column {
+                if (currentFolderId != null) {
+                    TextButton(onClick = { onMove(null) }) {
+                        Text("移到根书架")
+                    }
+                }
+                if (folders.isEmpty()) {
+                    Text("暂无文件夹，请先在根书架新建。")
+                } else {
+                    folders.forEach { f ->
+                        if (f.id != currentFolderId) {
+                            TextButton(onClick = { onMove(f.id) }) {
+                                Text(f.name)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+@Composable
 private fun EmptyBookshelf(
+    inFolder: Boolean,
     modifier: Modifier = Modifier,
-    onImport: () -> Unit
+    onImport: () -> Unit,
+    onCreateFolder: (() -> Unit)?
 ) {
     Column(
         modifier = modifier.padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            Icons.AutoMirrored.Filled.MenuBook,
+            if (inFolder) Icons.Default.Folder else Icons.AutoMirrored.Filled.MenuBook,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.height(64.dp)
         )
         Spacer(Modifier.height(16.dp))
-        Text("书架还是空的", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            if (inFolder) "文件夹还是空的" else "书架还是空的",
+            style = MaterialTheme.typography.headlineSmall
+        )
         Spacer(Modifier.height(8.dp))
         Text(
-            "点击右下角导入 TXT / PDF / Word 文档",
+            if (inFolder) "可导入文件，或从系统文件夹批量导入到此处"
+            else "可导入文件 / 从系统文件夹导入，或新建空文件夹",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
         )
         Spacer(Modifier.height(20.dp))
-        TextButton(onClick = onImport) { Text("立即导入") }
+        TextButton(onClick = onImport) { Text("导入文件") }
+        if (onCreateFolder != null) {
+            TextButton(onClick = onCreateFolder) { Text("新建空文件夹") }
+        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(
-    book: Book,
+private fun FolderCard(
+    item: ShelfItem.Folder,
     onClick: () -> Unit,
     onLongClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.72f)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFFFBBF24), Color(0xFFD97706))
+                        )
+                    )
+            ) {
+                // 封面预览拼贴
+                val covers = item.previewCoverPaths
+                if (covers.isNotEmpty()) {
+                    FolderCoverCollage(
+                        paths = covers,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp)
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(72.dp)
+                    )
+                }
+                Text(
+                    text = "文件夹",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    item.folder.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${item.bookCount} 本",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderCoverCollage(
+    paths: List<String>,
+    modifier: Modifier = Modifier
+) {
+    val bitmaps = remember(paths) {
+        paths.take(4).mapNotNull { p ->
+            runCatching {
+                BitmapFactory.decodeFile(p)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.2f))
+    ) {
+        when (bitmaps.size) {
+            0 -> Unit
+            1 -> Image(
+                bitmap = bitmaps[0],
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            else -> {
+                // 2x2
+                Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                        bitmaps.getOrNull(0)?.let {
+                            Image(
+                                bitmap = it,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.weight(1f).fillMaxSize().padding(1.dp)
+                            )
+                        }
+                        bitmaps.getOrNull(1)?.let {
+                            Image(
+                                bitmap = it,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.weight(1f).fillMaxSize().padding(1.dp)
+                            )
+                        }
+                    }
+                    if (bitmaps.size > 2) {
+                        Row(Modifier.weight(1f).fillMaxWidth()) {
+                            bitmaps.getOrNull(2)?.let {
+                                Image(
+                                    bitmap = it,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.weight(1f).fillMaxSize().padding(1.dp)
+                                )
+                            }
+                            bitmaps.getOrNull(3)?.let {
+                                Image(
+                                    bitmap = it,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.weight(1f).fillMaxSize().padding(1.dp)
+                                )
+                            } ?: Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ShelfBookCard(
+    book: Book,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    onMove: () -> Unit = {},
+    showMove: Boolean = false
 ) {
     val bookDir = remember(book.localPath) { CoverGenerator.bookDirOf(book.localPath) }
     val coverFile = remember(book.coverPath, bookDir) {
@@ -276,7 +688,6 @@ private fun BookCard(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
-                        // 底部渐变，保证标题可读
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -300,8 +711,7 @@ private fun BookCard(
                                 .padding(10.dp)
                         )
                     }
-                    // 无图时：文本类展示节选，PDF 显示占位
-                    !excerpt.isNullOrBlank() && book.format != BookFormat.PDF -> {
+                    !excerpt.isNullOrBlank() && book.format.isEbook -> {
                         TextExcerptCover(
                             title = book.title,
                             excerpt = excerpt,
@@ -362,6 +772,8 @@ private fun TextExcerptCover(
 ) {
     val bg = when (format) {
         BookFormat.TXT -> listOf(Color(0xFFEEF4FF), Color(0xFFD6E6FF))
+        BookFormat.MD -> listOf(Color(0xFFF3EEFF), Color(0xFFE4D9FF))
+        BookFormat.EPUB -> listOf(Color(0xFFFFF1E8), Color(0xFFFFDCC8))
         BookFormat.DOCX -> listOf(Color(0xFFE8F7FC), Color(0xFFCDECF7))
         else -> listOf(Color(0xFFF5F5F5), Color(0xFFE0E0E0))
     }
@@ -435,7 +847,7 @@ private fun FormatBadge(
     modifier: Modifier = Modifier
 ) {
     Text(
-        text = format.name,
+        text = format.displayLabel,
         style = MaterialTheme.typography.labelMedium,
         color = Color.White.copy(alpha = 0.95f),
         modifier = modifier
@@ -448,6 +860,8 @@ private fun FormatBadge(
 private fun coverBrush(format: BookFormat): Brush {
     val colors = when (format) {
         BookFormat.TXT -> listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8))
+        BookFormat.MD -> listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
+        BookFormat.EPUB -> listOf(Color(0xFFF97316), Color(0xFFC2410C))
         BookFormat.PDF -> listOf(Color(0xFFEF4444), Color(0xFFB91C1C))
         BookFormat.DOCX -> listOf(Color(0xFF0EA5E9), Color(0xFF0369A1))
     }
