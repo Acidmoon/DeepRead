@@ -66,6 +66,7 @@ fun AppBottomStatusBar(
             .fillMaxWidth()
             .zIndex(8f)
             .then(if (applyNavPadding) Modifier.navigationBarsPadding() else Modifier)
+            // 总内容高度约 ReadingLayout.statusOverlayContentHeight（8+13sp+8）
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically

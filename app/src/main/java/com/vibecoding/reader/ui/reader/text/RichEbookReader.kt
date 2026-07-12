@@ -3,8 +3,10 @@ package com.vibecoding.reader.ui.reader.text
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +35,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,10 +43,15 @@ import com.vibecoding.reader.domain.model.EbookBlock
 import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
+import com.vibecoding.reader.domain.reader.AutoPageTurn
+import com.vibecoding.reader.domain.reader.ReadingGestures
+import com.vibecoding.reader.ui.common.ReadingLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -63,7 +71,10 @@ fun RichEbookReader(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    onDoubleTap: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    pauseAutoTurn: Boolean = false
 ) {
     if (settings.pageTurnMode == PageTurnMode.VERTICAL) {
         RichVertical(
@@ -75,7 +86,10 @@ fun RichEbookReader(
             onJumpConsumed = onJumpConsumed,
             onProgress = onProgress,
             onToggleChrome = onToggleChrome,
-            modifier = modifier
+            onDoubleTap = onDoubleTap,
+            modifier = modifier,
+            bottomSafeInset = bottomSafeInset,
+            pauseAutoTurn = pauseAutoTurn
         )
     } else {
         RichHorizontal(
@@ -87,7 +101,10 @@ fun RichEbookReader(
             onJumpConsumed = onJumpConsumed,
             onProgress = onProgress,
             onToggleChrome = onToggleChrome,
-            modifier = modifier
+            onDoubleTap = onDoubleTap,
+            modifier = modifier,
+            bottomSafeInset = bottomSafeInset,
+            pauseAutoTurn = pauseAutoTurn
         )
     }
 }
@@ -103,8 +120,12 @@ private fun RichVertical(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier
+    onDoubleTap: () -> Unit,
+    modifier: Modifier,
+    bottomSafeInset: Dp,
+    pauseAutoTurn: Boolean
 ) {
+    val density = LocalDensity.current
     val listState = rememberLazyListState()
     val textColor = Color(settings.textColor)
     val bg = Color(settings.backgroundColor)
@@ -145,21 +166,56 @@ private fun RichVertical(
             }
     }
 
+    val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn
+    LaunchedEffect(
+        autoActive,
+        settings.autoScrollLinesPerSec,
+        settings.fontSizeSp,
+        settings.lineSpacingMultiplier
+    ) {
+        if (!autoActive) return@LaunchedEffect
+        val frameMs = 16L
+        while (isActive) {
+            val px = AutoPageTurn.scrollPxPerFrame(
+                fontSizeSp = settings.fontSizeSp,
+                lineSpacing = settings.lineSpacingMultiplier,
+                density = density.density,
+                linesPerSec = settings.autoScrollLinesPerSec,
+                frameMs = frameMs
+            )
+            listState.scroll { scrollBy(px) }
+            delay(frameMs)
+        }
+    }
+
     LazyColumn(
         state = listState,
+        contentPadding = PaddingValues(
+            start = settings.horizontalPaddingDp.dp,
+            end = settings.horizontalPaddingDp.dp,
+            top = settings.verticalPaddingDp.dp,
+            bottom = bottomSafeInset + 24.dp
+        ),
         modifier = modifier
             .fillMaxSize()
             .background(bg)
-            .padding(horizontal = settings.horizontalPaddingDp.dp)
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { onToggleChrome() })
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { offset ->
+                        if (
+                            ReadingGestures.resolveTap(offset.x, size.width.toFloat()) ==
+                            ReadingGestures.TapAction.TOGGLE_CHROME
+                        ) {
+                            onToggleChrome()
+                        }
+                    }
+                )
             }
     ) {
-        item { Spacer(Modifier.height(settings.verticalPaddingDp.dp)) }
         itemsIndexed(blocks, key = { i, b -> "${b.charOffset}-$i-${b::class.simpleName}" }) { _, block ->
             EbookBlockItem(block = block, settings = settings, textColor = textColor)
         }
-        item { Spacer(Modifier.height(48.dp)) }
     }
 }
 
@@ -178,7 +234,10 @@ private fun RichHorizontal(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier
+    onDoubleTap: () -> Unit,
+    modifier: Modifier,
+    bottomSafeInset: Dp,
+    pauseAutoTurn: Boolean
 ) {
     val density = LocalDensity.current
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -188,7 +247,8 @@ private fun RichHorizontal(
 
     val hPad = with(density) { settings.horizontalPaddingDp.dp.roundToPx() }
     val vPad = with(density) { settings.verticalPaddingDp.dp.roundToPx() }
-    val footer = with(density) { 22.dp.roundToPx() }
+    val footer = with(density) { ReadingLayout.pageFooterHeight.roundToPx() }
+    val bottomSafePx = with(density) { bottomSafeInset.roundToPx() }
     val fontPx = with(density) { settings.fontSizeSp.sp.toPx() }
     val paint = remember(fontPx) { TextPaginator.createPaint(fontPx) }
 
@@ -198,11 +258,12 @@ private fun RichHorizontal(
         settings.fontSizeSp,
         settings.lineSpacingMultiplier,
         settings.horizontalPaddingDp,
-        settings.verticalPaddingDp
+        settings.verticalPaddingDp,
+        bottomSafeInset
     ) {
         if (viewport.width <= 0 || viewport.height <= 0) return@LaunchedEffect
         val w = (viewport.width - hPad * 2).coerceAtLeast(1)
-        val h = (viewport.height - vPad * 2 - footer).coerceAtLeast(1)
+        val h = (viewport.height - vPad * 2 - footer - bottomSafePx).coerceAtLeast(1)
         pages = withContext(Dispatchers.Default) {
             buildRichPages(blocks, w, h, paint, settings.lineSpacingMultiplier)
         }
@@ -265,39 +326,53 @@ private fun RichHorizontal(
             }
     }
 
-    val allowSlide = settings.pageTurnMode == PageTurnMode.SLIDE ||
-        settings.pageTurnMode == PageTurnMode.BOTH
-    val allowTap = settings.pageTurnMode == PageTurnMode.TAP ||
-        settings.pageTurnMode == PageTurnMode.BOTH
+    val allowSlide = ReadingGestures.allowsSlidePageTurn(settings.pageTurnMode)
     val textColor = Color(settings.textColor)
     val bg = Color(settings.backgroundColor)
+    val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn && pages.isNotEmpty()
+
+    fun goPrev() {
+        scope.launch {
+            pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
+        }
+    }
+
+    fun goNext(): Boolean {
+        val last = (pages.size - 1).coerceAtLeast(0)
+        if (pagerState.currentPage >= last) return false
+        scope.launch {
+            pagerState.animateScrollToPage(
+                (pagerState.currentPage + 1).coerceAtMost(last)
+            )
+        }
+        return true
+    }
+
+    LaunchedEffect(autoActive, settings.autoPageIntervalSec, pagerState.currentPage, pages.size) {
+        if (!autoActive) return@LaunchedEffect
+        while (isActive) {
+            delay(AutoPageTurn.intervalMs(settings.autoPageIntervalSec))
+            if (!goNext()) break
+        }
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(bg)
             .onSizeChanged { viewport = it }
-            .pointerInput(allowTap, pages.size) {
-                detectTapGestures { offset ->
-                    if (!allowTap) {
-                        onToggleChrome()
-                        return@detectTapGestures
-                    }
-                    val w = size.width.toFloat()
-                    when {
-                        offset.x < w / 3f -> scope.launch {
-                            pagerState.animateScrollToPage(
-                                (pagerState.currentPage - 1).coerceAtLeast(0)
-                            )
+            .pointerInput(pages.size) {
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { offset ->
+                        if (
+                            ReadingGestures.resolveTap(offset.x, size.width.toFloat()) ==
+                            ReadingGestures.TapAction.TOGGLE_CHROME
+                        ) {
+                            onToggleChrome()
                         }
-                        offset.x > w * 2f / 3f -> scope.launch {
-                            pagerState.animateScrollToPage(
-                                (pagerState.currentPage + 1).coerceAtMost((pages.size - 1).coerceAtLeast(0))
-                            )
-                        }
-                        else -> onToggleChrome()
                     }
-                }
+                )
             }
             .then(
                 if (allowSlide) {
@@ -305,18 +380,10 @@ private fun RichHorizontal(
                         detectHorizontalDragGestures(
                             onDragStart = { dragAccum = 0f },
                             onDragEnd = {
-                                when {
-                                    dragAccum > 80f -> scope.launch {
-                                        pagerState.animateScrollToPage(
-                                            (pagerState.currentPage - 1).coerceAtLeast(0)
-                                        )
-                                    }
-                                    dragAccum < -80f -> scope.launch {
-                                        pagerState.animateScrollToPage(
-                                            (pagerState.currentPage + 1)
-                                                .coerceAtMost((pages.size - 1).coerceAtLeast(0))
-                                        )
-                                    }
+                                when (ReadingGestures.resolveHorizontalDrag(dragAccum)) {
+                                    ReadingGestures.SlideTurn.PREV -> goPrev()
+                                    ReadingGestures.SlideTurn.NEXT -> goNext()
+                                    null -> Unit
                                 }
                                 dragAccum = 0f
                             },
@@ -324,11 +391,12 @@ private fun RichHorizontal(
                             onHorizontalDrag = { _, dx -> dragAccum += dx }
                         )
                     }
-                } else Modifier
+                } else {
+                    Modifier
+                }
             )
     ) {
         if (pages.isEmpty()) {
-            // 仍在分页
             androidx.compose.material3.CircularProgressIndicator(
                 Modifier.align(Alignment.Center)
             )
@@ -342,8 +410,10 @@ private fun RichHorizontal(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(
-                            horizontal = settings.horizontalPaddingDp.dp,
-                            vertical = settings.verticalPaddingDp.dp
+                            start = settings.horizontalPaddingDp.dp,
+                            end = settings.horizontalPaddingDp.dp,
+                            top = settings.verticalPaddingDp.dp,
+                            bottom = settings.verticalPaddingDp.dp + bottomSafeInset
                         )
                 ) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {

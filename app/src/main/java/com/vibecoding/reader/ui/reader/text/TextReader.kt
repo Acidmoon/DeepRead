@@ -3,9 +3,11 @@ package com.vibecoding.reader.ui.reader.text
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +38,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,10 +47,15 @@ import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.TocEntry
+import com.vibecoding.reader.domain.reader.AutoPageTurn
+import com.vibecoding.reader.domain.reader.ReadingGestures
+import com.vibecoding.reader.ui.common.ReadingLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -61,11 +69,16 @@ fun TextReader(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
+    onDoubleTap: () -> Unit = {},
     modifier: Modifier = Modifier,
     /** 富内容块（含图片）；非空时优先用 RichEbookReader */
     blocks: List<EbookBlock> = emptyList(),
     @Suppress("UNUSED_PARAMETER")
-    markdownSource: String? = null
+    markdownSource: String? = null,
+    /** 正文底部安全区：避开状态浮层 + 系统导航 */
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    /** 菜单/弹层打开时暂停自动翻页 */
+    pauseAutoTurn: Boolean = false
 ) {
     // MD / EPUB 等带结构或图片的内容走富阅读器
     if (blocks.isNotEmpty()) {
@@ -78,7 +91,10 @@ fun TextReader(
             onJumpConsumed = onJumpConsumed,
             onProgress = onProgress,
             onToggleChrome = onToggleChrome,
-            modifier = modifier
+            onDoubleTap = onDoubleTap,
+            modifier = modifier,
+            bottomSafeInset = bottomSafeInset,
+            pauseAutoTurn = pauseAutoTurn
         )
         return
     }
@@ -93,7 +109,10 @@ fun TextReader(
             onJumpConsumed = onJumpConsumed,
             onProgress = onProgress,
             onToggleChrome = onToggleChrome,
-            modifier = modifier
+            onDoubleTap = onDoubleTap,
+            modifier = modifier,
+            bottomSafeInset = bottomSafeInset,
+            pauseAutoTurn = pauseAutoTurn
         )
     } else {
         PagedTextReader(
@@ -105,7 +124,10 @@ fun TextReader(
             onJumpConsumed = onJumpConsumed,
             onProgress = onProgress,
             onToggleChrome = onToggleChrome,
-            modifier = modifier
+            onDoubleTap = onDoubleTap,
+            modifier = modifier,
+            bottomSafeInset = bottomSafeInset,
+            pauseAutoTurn = pauseAutoTurn
         )
     }
 }
@@ -123,7 +145,10 @@ private fun PagedTextReader(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    onDoubleTap: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    pauseAutoTurn: Boolean = false
 ) {
     val density = LocalDensity.current
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -140,12 +165,15 @@ private fun PagedTextReader(
 
     val hPadPx = with(density) { settings.horizontalPaddingDp.dp.roundToPx() }
     val vPadPx = with(density) { settings.verticalPaddingDp.dp.roundToPx() }
-    val footerPx = with(density) { 22.dp.roundToPx() }
+    val footerPx = with(density) { ReadingLayout.pageFooterHeight.roundToPx() }
+    val bottomSafePx = with(density) { bottomSafeInset.roundToPx() }
     val fontPx = with(density) { settings.fontSizeSp.sp.toPx() }
     val textPaint = remember(fontPx) { TextPaginator.createPaint(fontPx) }
 
     fun contentWidth(): Int = (viewport.width - hPadPx * 2).coerceAtLeast(1)
-    fun contentHeight(): Int = (viewport.height - vPadPx * 2 - footerPx).coerceAtLeast(1)
+    // 底边：版心下边距 + 页脚 + 状态浮层安全区
+    fun contentHeight(): Int =
+        (viewport.height - vPadPx * 2 - footerPx - bottomSafePx).coerceAtLeast(1)
 
     suspend fun buildPages(index: Int): List<TextPageBreak> {
         val ch = chapters.getOrNull(index) ?: return emptyList()
@@ -172,7 +200,8 @@ private fun PagedTextReader(
         settings.fontSizeSp,
         settings.lineSpacingMultiplier,
         settings.horizontalPaddingDp,
-        settings.verticalPaddingDp
+        settings.verticalPaddingDp,
+        bottomSafeInset
     ) {
         if (viewport.width <= 0 || viewport.height <= 0 || text.isEmpty()) {
             pages = emptyList()
@@ -215,10 +244,8 @@ private fun PagedTextReader(
         )
     }
 
-    val allowSlide = settings.pageTurnMode == PageTurnMode.SLIDE ||
-        settings.pageTurnMode == PageTurnMode.BOTH
-    val allowTap = settings.pageTurnMode == PageTurnMode.TAP ||
-        settings.pageTurnMode == PageTurnMode.BOTH
+    val allowSlide = ReadingGestures.allowsSlidePageTurn(settings.pageTurnMode)
+    val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn && !paginating
 
     fun goPrev() {
         if (pageIndex > 0) {
@@ -238,10 +265,10 @@ private fun PagedTextReader(
         }
     }
 
-    fun goNext() {
+    fun goNext(): Boolean {
         if (pageIndex < pages.lastIndex) {
             pageIndex++
-            return
+            return true
         }
         if (chapterIndex < chapters.lastIndex) {
             scope.launch {
@@ -253,6 +280,23 @@ private fun PagedTextReader(
                 pageIndex = 0
                 paginating = false
             }
+            return true
+        }
+        return false
+    }
+
+    // 自动翻页：固定间隔下一页
+    LaunchedEffect(
+        autoActive,
+        settings.autoPageIntervalSec,
+        pageIndex,
+        chapterIndex,
+        pages.size
+    ) {
+        if (!autoActive) return@LaunchedEffect
+        while (isActive) {
+            delay(AutoPageTurn.intervalMs(settings.autoPageIntervalSec))
+            if (!goNext()) break
         }
     }
 
@@ -264,19 +308,18 @@ private fun PagedTextReader(
             .fillMaxSize()
             .background(Color(settings.backgroundColor))
             .onSizeChanged { viewport = it }
-            .pointerInput(allowTap, pageIndex, pages.size, chapterIndex) {
-                detectTapGestures { offset ->
-                    if (!allowTap) {
-                        onToggleChrome()
-                        return@detectTapGestures
+            .pointerInput(pageIndex, pages.size, chapterIndex) {
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { offset ->
+                        if (
+                            ReadingGestures.resolveTap(offset.x, size.width.toFloat()) ==
+                            ReadingGestures.TapAction.TOGGLE_CHROME
+                        ) {
+                            onToggleChrome()
+                        }
                     }
-                    val w = size.width.toFloat()
-                    when {
-                        offset.x < w / 3f -> goPrev()
-                        offset.x > w * 2f / 3f -> goNext()
-                        else -> onToggleChrome()
-                    }
-                }
+                )
             }
             .then(
                 if (allowSlide) {
@@ -284,9 +327,10 @@ private fun PagedTextReader(
                         detectHorizontalDragGestures(
                             onDragStart = { dragAccum = 0f },
                             onDragEnd = {
-                                when {
-                                    dragAccum > 80f -> goPrev()
-                                    dragAccum < -80f -> goNext()
+                                when (ReadingGestures.resolveHorizontalDrag(dragAccum)) {
+                                    ReadingGestures.SlideTurn.PREV -> goPrev()
+                                    ReadingGestures.SlideTurn.NEXT -> goNext()
+                                    null -> Unit
                                 }
                                 dragAccum = 0f
                             },
@@ -308,8 +352,10 @@ private fun PagedTextReader(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(
-                            horizontal = settings.horizontalPaddingDp.dp,
-                            vertical = settings.verticalPaddingDp.dp
+                            start = settings.horizontalPaddingDp.dp,
+                            end = settings.horizontalPaddingDp.dp,
+                            top = settings.verticalPaddingDp.dp,
+                            bottom = settings.verticalPaddingDp.dp + bottomSafeInset
                         )
                 ) {
                     PageTextView(
@@ -362,8 +408,12 @@ private fun VerticalScrollReader(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    onDoubleTap: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    pauseAutoTurn: Boolean = false
 ) {
+    val density = LocalDensity.current
     val chapters = remember(text.length, toc) {
         TextPaginator.buildChapters(text.length, toc)
     }
@@ -422,6 +472,31 @@ private fun VerticalScrollReader(
             }
     }
 
+    val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn
+    // 竖滑自动滚：按行速换算像素
+    LaunchedEffect(
+        autoActive,
+        settings.autoScrollLinesPerSec,
+        settings.fontSizeSp,
+        settings.lineSpacingMultiplier
+    ) {
+        if (!autoActive) return@LaunchedEffect
+        val frameMs = 16L
+        while (isActive) {
+            val px = AutoPageTurn.scrollPxPerFrame(
+                fontSizeSp = settings.fontSizeSp,
+                lineSpacing = settings.lineSpacingMultiplier,
+                density = density.density,
+                linesPerSec = settings.autoScrollLinesPerSec,
+                frameMs = frameMs
+            )
+            listState.scroll {
+                scrollBy(px)
+            }
+            delay(frameMs)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -429,11 +504,26 @@ private fun VerticalScrollReader(
     ) {
         LazyColumn(
             state = listState,
+            contentPadding = PaddingValues(
+                start = settings.horizontalPaddingDp.dp,
+                end = settings.horizontalPaddingDp.dp,
+                top = settings.verticalPaddingDp.dp,
+                bottom = bottomSafeInset + 24.dp
+            ),
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = settings.horizontalPaddingDp.dp)
                 .pointerInput(Unit) {
-                    detectTapGestures(onTap = { onToggleChrome() })
+                    detectTapGestures(
+                        onDoubleTap = { onDoubleTap() },
+                        onTap = { offset ->
+                            if (
+                                ReadingGestures.resolveTap(offset.x, size.width.toFloat()) ==
+                                ReadingGestures.TapAction.TOGGLE_CHROME
+                            ) {
+                                onToggleChrome()
+                            }
+                        }
+                    )
                 }
         ) {
             if (chapters.size > 1) {
@@ -444,7 +534,7 @@ private fun VerticalScrollReader(
                         fontSize = 13.sp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 12.dp)
+                            .padding(bottom = 12.dp)
                     )
                 }
             }
@@ -497,7 +587,7 @@ private fun VerticalScrollReader(
                             Text("下一章 ›", color = Color(settings.textColor))
                         }
                     }
-                    Spacer(Modifier.height(48.dp))
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }

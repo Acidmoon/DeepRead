@@ -7,11 +7,14 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,15 +39,21 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
+import com.vibecoding.reader.domain.reader.AutoPageTurn
+import com.vibecoding.reader.domain.reader.ReadingGestures
+import com.vibecoding.reader.ui.common.ReadingLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -62,8 +71,11 @@ fun PdfReader(
     onJumpConsumed: () -> Unit,
     onProgress: (position: String, progress: Float, pageIndex: Int, pageCount: Int) -> Unit,
     onToggleChrome: () -> Unit,
+    onDoubleTap: () -> Unit = {},
     onPageCount: (Int) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    pauseAutoTurn: Boolean = false
 ) {
     val rendererHolder = remember { PdfRendererHolder() }
     var pageCount by remember { mutableIntStateOf(0) }
@@ -118,13 +130,17 @@ fun PdfReader(
                 PdfVerticalReader(
                     rendererHolder = rendererHolder,
                     pageCount = pageCount,
+                    settings = settings,
                     background = bg,
                     initialPosition = initialPosition,
                     jumpPosition = jumpPosition,
                     onJumpConsumed = onJumpConsumed,
                     onProgress = onProgress,
                     onToggleChrome = onToggleChrome,
-                    modifier = Modifier.fillMaxSize()
+                    onDoubleTap = onDoubleTap,
+                    modifier = Modifier.fillMaxSize(),
+                    bottomSafeInset = bottomSafeInset,
+                    pauseAutoTurn = pauseAutoTurn
                 )
             }
             else -> {
@@ -138,7 +154,10 @@ fun PdfReader(
                     onJumpConsumed = onJumpConsumed,
                     onProgress = onProgress,
                     onToggleChrome = onToggleChrome,
-                    modifier = Modifier.fillMaxSize()
+                    onDoubleTap = onDoubleTap,
+                    modifier = Modifier.fillMaxSize(),
+                    bottomSafeInset = bottomSafeInset,
+                    pauseAutoTurn = pauseAutoTurn
                 )
             }
         }
@@ -157,7 +176,10 @@ private fun PdfHorizontalReader(
     onJumpConsumed: () -> Unit,
     onProgress: (String, Float, Int, Int) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    onDoubleTap: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    pauseAutoTurn: Boolean = false
 ) {
     val scope = rememberCoroutineScope()
     val initialPage = (ReaderPosition.parse(initialPosition) as? ReaderPosition.PageIndex)
@@ -167,10 +189,8 @@ private fun PdfHorizontalReader(
         pageCount = { pageCount }
     )
 
-    val allowSlide = settings.pdfPageTurnMode == PageTurnMode.SLIDE ||
-        settings.pdfPageTurnMode == PageTurnMode.BOTH
-    val allowTap = settings.pdfPageTurnMode == PageTurnMode.TAP ||
-        settings.pdfPageTurnMode == PageTurnMode.BOTH
+    val allowSlide = ReadingGestures.allowsSlidePageTurn(settings.pdfPageTurnMode)
+    val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn && pageCount > 0
 
     LaunchedEffect(jumpPosition, pageCount) {
         val jump = jumpPosition ?: return@LaunchedEffect
@@ -195,39 +215,49 @@ private fun PdfHorizontalReader(
             }
     }
 
+    fun goNext(): Boolean {
+        if (pagerState.currentPage >= pageCount - 1) return false
+        scope.launch {
+            pagerState.animateScrollToPage(
+                (pagerState.currentPage + 1).coerceAtMost(pageCount - 1)
+            )
+        }
+        return true
+    }
+
+    LaunchedEffect(autoActive, settings.autoPageIntervalSec, pagerState.currentPage, pageCount) {
+        if (!autoActive) return@LaunchedEffect
+        while (isActive) {
+            delay(AutoPageTurn.intervalMs(settings.autoPageIntervalSec))
+            if (!goNext()) break
+        }
+    }
+
     HorizontalPager(
         state = pagerState,
         userScrollEnabled = allowSlide,
         modifier = modifier
             .fillMaxSize()
             .background(background)
-            .pointerInput(allowTap, pageCount) {
-                detectTapGestures { offset ->
-                    if (!allowTap) {
-                        onToggleChrome()
-                        return@detectTapGestures
-                    }
-                    val w = size.width.toFloat()
-                    when {
-                        offset.x < w / 3f -> scope.launch {
-                            pagerState.animateScrollToPage(
-                                (pagerState.currentPage - 1).coerceAtLeast(0)
-                            )
+            .pointerInput(pageCount) {
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { offset ->
+                        if (
+                            ReadingGestures.resolveTap(offset.x, size.width.toFloat()) ==
+                            ReadingGestures.TapAction.TOGGLE_CHROME
+                        ) {
+                            onToggleChrome()
                         }
-                        offset.x > w * 2f / 3f -> scope.launch {
-                            pagerState.animateScrollToPage(
-                                (pagerState.currentPage + 1).coerceAtMost(pageCount - 1)
-                            )
-                        }
-                        else -> onToggleChrome()
                     }
-                }
+                )
             }
     ) { page ->
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .background(background),
+                .background(background)
+                .padding(bottom = bottomSafeInset),
             contentAlignment = Alignment.Center
         ) {
             val density = LocalDensity.current
@@ -250,14 +280,19 @@ private fun PdfHorizontalReader(
 private fun PdfVerticalReader(
     rendererHolder: PdfRendererHolder,
     pageCount: Int,
+    settings: ReadingSettings,
     background: Color,
     initialPosition: String,
     jumpPosition: String?,
     onJumpConsumed: () -> Unit,
     onProgress: (String, Float, Int, Int) -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    onDoubleTap: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    bottomSafeInset: Dp = ReadingLayout.statusOverlayContentHeight,
+    pauseAutoTurn: Boolean = false
 ) {
+    val density = LocalDensity.current
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex =
             (ReaderPosition.parse(initialPosition) as? ReaderPosition.PageIndex)
@@ -290,19 +325,47 @@ private fun PdfVerticalReader(
             }
     }
 
+    val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn
+    // PDF 竖滑：用电子书字号/行距估行高（与设置一致），否则用固定 24sp 行高
+    LaunchedEffect(autoActive, settings.autoScrollLinesPerSec, settings.fontSizeSp) {
+        if (!autoActive) return@LaunchedEffect
+        val frameMs = 16L
+        while (isActive) {
+            val px = AutoPageTurn.scrollPxPerFrame(
+                fontSizeSp = settings.fontSizeSp.coerceAtLeast(16f),
+                lineSpacing = settings.lineSpacingMultiplier,
+                density = density.density,
+                linesPerSec = settings.autoScrollLinesPerSec,
+                frameMs = frameMs
+            )
+            listState.scroll { scrollBy(px) }
+            delay(frameMs)
+        }
+    }
+
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(background)
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { onToggleChrome() })
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { offset ->
+                        if (
+                            ReadingGestures.resolveTap(offset.x, size.width.toFloat()) ==
+                            ReadingGestures.TapAction.TOGGLE_CHROME
+                        ) {
+                            onToggleChrome()
+                        }
+                    }
+                )
             }
     ) {
-        val density = LocalDensity.current
         val viewportW = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
 
         LazyColumn(
             state = listState,
+            contentPadding = PaddingValues(bottom = bottomSafeInset + 16.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             items(pages, key = { it }) { page ->

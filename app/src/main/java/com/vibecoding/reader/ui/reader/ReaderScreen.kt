@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,11 +77,13 @@ import com.vibecoding.reader.domain.reader.ReadingProgress
 import com.vibecoding.reader.domain.reader.ScreenDim
 import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.ui.common.AppBottomStatusBar
+import com.vibecoding.reader.ui.common.rememberReadingBottomSafeInset
 import com.vibecoding.reader.ui.reader.pdf.PdfReader
 import com.vibecoding.reader.ui.reader.text.TextReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.zIndex
 
 private enum class SheetKind {
     TOC,
@@ -138,6 +141,30 @@ fun ReaderScreen(
             null -> Color(settings.backgroundColor)
             else -> Color(settings.backgroundColor)
         }
+    }
+    // 正文底边安全区：避开状态浮层（菜单可盖住浮层，正文始终留白）
+    val bottomSafeInset = rememberReadingBottomSafeInset()
+    val pauseAutoTurn = showChrome || sheetKind != null
+
+    fun toggleAutoPageTurn() {
+        val next = !settings.autoPageTurnEnabled
+        viewModel.updateSettings(settings.copy(autoPageTurnEnabled = next))
+        snackMsg = if (next) "已开启自动翻页" else "已关闭自动翻页"
+    }
+
+    fun addBookmarkAtCurrent() {
+        val pos = currentPosition.ifBlank { content.initialPosition }
+        if (pos.isBlank()) {
+            snackMsg = "暂无位置可收藏"
+            return
+        }
+        val label = when (val p = ReaderPosition.parse(pos)) {
+            is ReaderPosition.CharOffset -> viewModel.excerptForText(p.offset)
+            is ReaderPosition.PageIndex -> "第 ${p.page + 1} 页"
+            null -> "书签"
+        }
+        viewModel.addBookmark(pos, label)
+        snackMsg = "已添加书签"
     }
 
     Scaffold(
@@ -220,9 +247,12 @@ fun ReaderScreen(
                                             viewModel.saveProgress(pos, progress)
                                         },
                                         onToggleChrome = { showChrome = !showChrome },
+                                        onDoubleTap = { toggleAutoPageTurn() },
                                         modifier = Modifier.fillMaxSize(),
                                         blocks = content.blocks,
-                                        markdownSource = content.markdownSource
+                                        markdownSource = content.markdownSource,
+                                        bottomSafeInset = bottomSafeInset,
+                                        pauseAutoTurn = pauseAutoTurn
                                     )
                                 }
                                 BookFormat.PDF -> {
@@ -239,15 +269,18 @@ fun ReaderScreen(
                                             viewModel.saveProgress(pos, progress)
                                         },
                                         onToggleChrome = { showChrome = !showChrome },
+                                        onDoubleTap = { toggleAutoPageTurn() },
                                         onPageCount = { pdfPageCount = it },
-                                        modifier = Modifier.fillMaxSize()
+                                        modifier = Modifier.fillMaxSize(),
+                                        bottomSafeInset = bottomSafeInset,
+                                        pauseAutoTurn = pauseAutoTurn
                                     )
                                 }
                             }
                         }
 
                         if (showChrome) {
-                            // 顶栏：返回 + 居中书名 + 进度
+                            // 顶栏：返回 + 居中书名 + 进度（盖在内容之上）
                             val isEbook = book!!.format.isEbook
                             val textLen = content.text.length
                             val canSeekEbook = isEbook && textLen > 0
@@ -285,6 +318,10 @@ fun ReaderScreen(
                                     }
                                     onBack()
                                 },
+                                onOpenBookmarks = {
+                                    sheetKind = SheetKind.BOOKMARKS
+                                },
+                                onAddBookmark = { addBookmarkAtCurrent() },
                                 onSeekProgress = when {
                                     canSeekEbook -> { p ->
                                         val pos = ReadingProgress.positionFromProgress(p, textLen)
@@ -305,9 +342,12 @@ fun ReaderScreen(
                                     }
                                     else -> null
                                 },
-                                modifier = Modifier.align(Alignment.TopCenter)
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .zIndex(2f)
                             )
 
+                            // 底栏：目录 / 搜索 / 亮度 / 设置（书签在顶栏）
                             ReaderBottomChrome(
                                 hasChapters = book!!.format.isEbook &&
                                     content.toc.size >= 2,
@@ -326,27 +366,6 @@ fun ReaderScreen(
                                 onOpenToc = {
                                     sheetKind = SheetKind.TOC
                                 },
-                                onOpenBookmarks = {
-                                    sheetKind = SheetKind.BOOKMARKS
-                                },
-                                onAddBookmark = {
-                                    val pos = currentPosition.ifBlank {
-                                        content.initialPosition
-                                    }
-                                    if (pos.isBlank()) {
-                                        snackMsg = "暂无位置可收藏"
-                                        return@ReaderBottomChrome
-                                    }
-                                    val label = when (val p = ReaderPosition.parse(pos)) {
-                                        is ReaderPosition.CharOffset ->
-                                            viewModel.excerptForText(p.offset)
-                                        is ReaderPosition.PageIndex ->
-                                            "第 ${p.page + 1} 页"
-                                        null -> "书签"
-                                    }
-                                    viewModel.addBookmark(pos, label)
-                                    snackMsg = "已添加书签"
-                                },
                                 onOpenSettings = {
                                     sheetKind = SheetKind.SETTINGS
                                 },
@@ -357,22 +376,23 @@ fun ReaderScreen(
                                 onOpenBrightness = {
                                     sheetKind = SheetKind.BRIGHTNESS
                                 },
-                                // 底栏抬高，避开底部状态文字
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
-                                    .padding(bottom = 36.dp)
+                                    .zIndex(2f)
                             )
                         }
                     }
                 }
             }
 
-            // 始终叠在最上层：进度 / 电量 / 时间（无色条，随背景反色）
+            // 状态浮层 zIndex 低于菜单，唤起菜单时可被底栏覆盖
             AppBottomStatusBar(
                 progressPercent = if (readingReady) currentProgress else null,
                 onBackground = pageBg,
                 applyNavPadding = true,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .zIndex(1f)
             )
         }
     }
@@ -452,13 +472,15 @@ fun ReaderScreen(
 }
 
 /**
- * 顶栏：返回 + 居中书名 + 可拖动进度条跳转。
+ * 顶栏：返回 + 居中书名 + 书签图标 + 可拖动进度条。
  */
 @Composable
 private fun ReaderTopChrome(
     title: String,
     progressPercent: Float,
     onBack: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onAddBookmark: () -> Unit,
     onSeekProgress: ((Float) -> Unit)? = null,
     progressLabel: String? = null,
     modifier: Modifier = Modifier
@@ -493,7 +515,7 @@ private fun ReaderTopChrome(
                 Column(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .padding(horizontal = 52.dp)
+                        .padding(horizontal = 100.dp)
                         .fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -514,6 +536,23 @@ private fun ReaderTopChrome(
                         textAlign = TextAlign.Center
                     )
                 }
+                Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onOpenBookmarks) {
+                        Icon(
+                            Icons.Default.Bookmark,
+                            contentDescription = "书签列表"
+                        )
+                    }
+                    IconButton(onClick = onAddBookmark) {
+                        Icon(
+                            Icons.Default.BookmarkAdd,
+                            contentDescription = "添加书签"
+                        )
+                    }
+                }
             }
             if (onSeekProgress != null) {
                 Slider(
@@ -529,7 +568,7 @@ private fun ReaderTopChrome(
 }
 
 /**
- * 底栏：第一行上一章/下一章，第二行目录、书签、加书签、设置。
+ * 底栏：上一章/下一章 + 目录 / 搜索 / 亮度 / 设置。
  */
 @Composable
 private fun ReaderBottomChrome(
@@ -539,8 +578,6 @@ private fun ReaderBottomChrome(
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
     onOpenToc: () -> Unit,
-    onOpenBookmarks: () -> Unit,
-    onAddBookmark: () -> Unit,
     onOpenSettings: () -> Unit,
     showSearch: Boolean = false,
     onOpenSearch: () -> Unit = {},
@@ -557,7 +594,8 @@ private fun ReaderBottomChrome(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // 系统导航区由底部 AppBottomStatusBar 承担，此处不再重复 padding
+                // 贴底覆盖状态浮层，需自行避开系统导航/手势条
+                .navigationBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
             if (hasChapters) {
@@ -624,16 +662,6 @@ private fun ReaderBottomChrome(
                         onClick = onOpenSearch
                     )
                 }
-                BottomAction(
-                    icon = Icons.Default.Bookmark,
-                    label = "书签",
-                    onClick = onOpenBookmarks
-                )
-                BottomAction(
-                    icon = Icons.Default.BookmarkAdd,
-                    label = "加书签",
-                    onClick = onAddBookmark
-                )
                 BottomAction(
                     icon = Icons.Default.BrightnessMedium,
                     label = "亮度",

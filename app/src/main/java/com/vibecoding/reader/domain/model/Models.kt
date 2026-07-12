@@ -206,6 +206,16 @@ data class ReadingSettings(
      * 由 [com.vibecoding.reader.domain.reader.ScreenDim] 做 clamp。
      */
     val screenDim: Float = 0f,
+    /**
+     * 自动翻页总开关。
+     * - 分页：每隔 [autoPageIntervalSec] 秒下一页
+     * - 竖滑：每秒滚动 [autoScrollLinesPerSec] 行
+     */
+    val autoPageTurnEnabled: Boolean = false,
+    /** 分页自动翻页间隔（秒） */
+    val autoPageIntervalSec: Float = 8f,
+    /** 竖滑自动滚动速度（行/秒） */
+    val autoScrollLinesPerSec: Float = 1.2f,
     // —— PDF（与电子书设置分离）——
     val pdfPageTurnMode: PageTurnMode = PageTurnMode.BOTH,
     val pdfBackgroundColor: Long = 0xFF000000

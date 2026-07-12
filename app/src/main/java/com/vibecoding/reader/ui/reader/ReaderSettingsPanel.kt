@@ -32,6 +32,7 @@ import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.DefaultThemePresets
 import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReadingSettings
+import com.vibecoding.reader.domain.reader.AutoPageTurn
 
 private val PdfBgPresets = listOf(
     "纯黑" to 0xFF000000L,
@@ -85,12 +86,12 @@ private fun PdfSettingsPanel(
             PdfPageModeChip(
                 selected = isHorizontalMode(settings.pdfPageTurnMode) &&
                     settings.pdfPageTurnMode == PageTurnMode.BOTH,
-                label = "点按+左右滑",
+                label = "滑动+菜单",
                 onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.BOTH)) }
             )
             PdfPageModeChip(
                 selected = settings.pdfPageTurnMode == PageTurnMode.TAP,
-                label = "点按翻页",
+                label = "仅菜单",
                 onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.TAP)) }
             )
             PdfPageModeChip(
@@ -104,6 +105,15 @@ private fun PdfSettingsPanel(
                 onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.VERTICAL)) }
             )
         }
+        Text(
+            "手势：仅点击中间唤起菜单",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.padding(top = 6.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+        AutoPageTurnSettingsSection(settings = settings, onChange = onChange)
 
         Spacer(Modifier.height(20.dp))
         Text("页边背景", style = MaterialTheme.typography.labelLarge)
@@ -247,15 +257,24 @@ private fun TextSettingsPanel(
                         Text(
                             when (mode) {
                                 PageTurnMode.VERTICAL -> "上下滚动"
-                                PageTurnMode.TAP -> "点按翻页"
+                                PageTurnMode.TAP -> "仅菜单"
                                 PageTurnMode.SLIDE -> "左右滑动"
-                                PageTurnMode.BOTH -> "点按+左右滑"
+                                PageTurnMode.BOTH -> "滑动+菜单"
                             }
                         )
                     }
                 )
             }
         }
+        Text(
+            "手势：仅点击中间区域唤起菜单；滑动模式下可左右滑翻页",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.padding(top = 6.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+        AutoPageTurnSettingsSection(settings = settings, onChange = onChange)
 
         Spacer(Modifier.height(16.dp))
         Box(
@@ -278,4 +297,46 @@ private fun TextSettingsPanel(
             )
         }
     }
+}
+
+@Composable
+private fun AutoPageTurnSettingsSection(
+    settings: ReadingSettings,
+    onChange: (ReadingSettings) -> Unit
+) {
+    Text("自动翻页", style = MaterialTheme.typography.labelLarge)
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = "双击屏幕可开启 / 关闭自动翻页",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    )
+
+    Spacer(Modifier.height(10.dp))
+    Text(
+        text = "分页间隔 ${"%.0f".format(AutoPageTurn.clampIntervalSec(settings.autoPageIntervalSec))} 秒",
+        style = MaterialTheme.typography.bodyMedium
+    )
+    Slider(
+        value = AutoPageTurn.clampIntervalSec(settings.autoPageIntervalSec),
+        onValueChange = { v ->
+            onChange(settings.copy(autoPageIntervalSec = AutoPageTurn.clampIntervalSec(v)))
+        },
+        valueRange = AutoPageTurn.MIN_INTERVAL_SEC..AutoPageTurn.MAX_INTERVAL_SEC,
+        steps = 28
+    )
+
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "竖滑速度 ${"%.1f".format(AutoPageTurn.clampLinesPerSec(settings.autoScrollLinesPerSec))} 行/秒",
+        style = MaterialTheme.typography.bodyMedium
+    )
+    Slider(
+        value = AutoPageTurn.clampLinesPerSec(settings.autoScrollLinesPerSec),
+        onValueChange = { v ->
+            onChange(settings.copy(autoScrollLinesPerSec = AutoPageTurn.clampLinesPerSec(v)))
+        },
+        valueRange = AutoPageTurn.MIN_LINES_PER_SEC..AutoPageTurn.MAX_LINES_PER_SEC,
+        steps = 22
+    )
 }
