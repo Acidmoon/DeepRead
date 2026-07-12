@@ -74,6 +74,7 @@ import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.model.TocKind
+import com.vibecoding.reader.domain.reader.ReadingProgress
 import com.vibecoding.reader.domain.reader.ScreenDim
 import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.ui.reader.pdf.PdfReader
@@ -106,6 +107,7 @@ fun ReaderScreen(
     var sheetKind by remember { mutableStateOf<SheetKind?>(null) }
     var currentPosition by remember { mutableStateOf("") }
     var currentProgress by remember { mutableStateOf(0f) }
+    var pdfPageCount by remember { mutableIntStateOf(0) }
     var snackMsg by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
 
@@ -196,12 +198,14 @@ fun ReaderScreen(
                                         initialPosition = content.initialPosition,
                                         jumpPosition = jumpPosition,
                                         onJumpConsumed = viewModel::consumeJump,
-                                        onProgress = { pos, progress, _, _ ->
+                                        onProgress = { pos, progress, _, count ->
                                             currentPosition = pos
                                             currentProgress = progress
+                                            if (count > 0) pdfPageCount = count
                                             viewModel.saveProgress(pos, progress)
                                         },
                                         onToggleChrome = { showChrome = !showChrome },
+                                        onPageCount = { pdfPageCount = it },
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
@@ -210,9 +214,34 @@ fun ReaderScreen(
 
                         if (showChrome) {
                             // 顶栏：返回 + 居中书名 + 进度
+                            val isEbook = book!!.format.isEbook
+                            val textLen = content.text.length
+                            val canSeekEbook = isEbook && textLen > 0
+                            val canSeekPdf = book!!.format == BookFormat.PDF && pdfPageCount > 0
                             ReaderTopChrome(
                                 title = book?.title ?: "阅读",
                                 progressPercent = currentProgress,
+                                progressLabel = buildString {
+                                    append("${(currentProgress.coerceIn(0f, 1f) * 100).toInt()}%")
+                                    if (canSeekEbook) {
+                                        val off = (ReaderPosition.parse(
+                                            currentPosition.ifBlank { content.initialPosition }
+                                        ) as? ReaderPosition.CharOffset)?.offset ?: 0
+                                        append(" · ")
+                                        append(off.coerceIn(0, textLen))
+                                        append("/")
+                                        append(textLen)
+                                    } else if (canSeekPdf) {
+                                        val page = (ReaderPosition.parse(
+                                            currentPosition.ifBlank { content.initialPosition }
+                                        ) as? ReaderPosition.PageIndex)?.page ?: 0
+                                        append(" · 第 ")
+                                        append(page + 1)
+                                        append("/")
+                                        append(pdfPageCount)
+                                        append(" 页")
+                                    }
+                                },
                                 onBack = {
                                     if (currentPosition.isNotBlank()) {
                                         viewModel.saveProgressNow(
@@ -221,6 +250,26 @@ fun ReaderScreen(
                                         )
                                     }
                                     onBack()
+                                },
+                                onSeekProgress = when {
+                                    canSeekEbook -> { p ->
+                                        val pos = ReadingProgress.positionFromProgress(p, textLen)
+                                        currentPosition = pos
+                                        currentProgress = p
+                                        viewModel.jumpTo(pos)
+                                        viewModel.saveProgress(pos, p)
+                                    }
+                                    canSeekPdf -> { p ->
+                                        val pos = ReadingProgress.pagePositionFromProgress(
+                                            p,
+                                            pdfPageCount
+                                        )
+                                        currentPosition = pos
+                                        currentProgress = p
+                                        viewModel.jumpTo(pos)
+                                        viewModel.saveProgress(pos, p)
+                                    }
+                                    else -> null
                                 },
                                 modifier = Modifier.align(Alignment.TopCenter)
                             )
@@ -357,13 +406,15 @@ fun ReaderScreen(
 }
 
 /**
- * 顶栏：左侧返回，中间居中书名，下方细进度；不把功能按钮堆在右上角。
+ * 顶栏：返回 + 居中书名 + 可拖动进度条跳转。
  */
 @Composable
 private fun ReaderTopChrome(
     title: String,
     progressPercent: Float,
     onBack: () -> Unit,
+    onSeekProgress: ((Float) -> Unit)? = null,
+    progressLabel: String? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -376,7 +427,7 @@ private fun ReaderTopChrome(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(bottom = 10.dp)
+                .padding(bottom = 8.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -393,7 +444,6 @@ private fun ReaderTopChrome(
                         contentDescription = "返回"
                     )
                 }
-                // 书名真正居中（不挤在返回键右侧）
                 Column(
                     modifier = Modifier
                         .align(Alignment.Center)
@@ -411,12 +461,22 @@ private fun ReaderTopChrome(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        text = "${(progressPercent.coerceIn(0f, 1f) * 100).toInt()}%",
+                        text = progressLabel
+                            ?: "${(progressPercent.coerceIn(0f, 1f) * 100).toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         textAlign = TextAlign.Center
                     )
                 }
+            }
+            if (onSeekProgress != null) {
+                Slider(
+                    value = progressPercent.coerceIn(0f, 1f),
+                    onValueChange = onSeekProgress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                )
             }
         }
     }
