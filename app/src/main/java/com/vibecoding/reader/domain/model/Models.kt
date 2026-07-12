@@ -78,13 +78,19 @@ data class TocEntry(
 )
 
 data class ReadingSettings(
+    // —— 文本（TXT / DOCX）——
     val backgroundColor: Long = 0xFFF5F0E6,
     val textColor: Long = 0xFF1A1A1A,
     val fontSizeSp: Float = 20f,
     val lineSpacingMultiplier: Float = 1.6f,
     val pageTurnMode: PageTurnMode = PageTurnMode.BOTH,
     val horizontalPaddingDp: Float = 24f,
-    val verticalPaddingDp: Float = 20f
+    val verticalPaddingDp: Float = 20f,
+    // —— PDF（与文本设置分离）——
+    /** PDF 翻页：左右类模式或上下滚动 */
+    val pdfPageTurnMode: PageTurnMode = PageTurnMode.BOTH,
+    /** PDF 页外底色（全屏留边） */
+    val pdfBackgroundColor: Long = 0xFF000000
 )
 
 /**

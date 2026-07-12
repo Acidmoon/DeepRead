@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
         BookmarkEntity::class,
         ReadingSettingsEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -33,19 +33,21 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "reader.db"
-                ).addCallback(object : Callback() {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        super.onCreate(db)
-                        // Seed default settings after open via instance
-                    }
-                }).build().also { built ->
-                    instance = built
-                    CoroutineScope(Dispatchers.IO).launch {
-                        if (built.settingsDao().get() == null) {
-                            built.settingsDao().upsert(ReadingSettingsEntity.default())
+                )
+                    // v2 增加 PDF 独立设置字段；MVP 直接重建本地库
+                    .fallbackToDestructiveMigration()
+                    .addCallback(object : Callback() {
+                        override fun onCreate(db: SupportSQLiteDatabase) {
+                            super.onCreate(db)
+                        }
+                    }).build().also { built ->
+                        instance = built
+                        CoroutineScope(Dispatchers.IO).launch {
+                            if (built.settingsDao().get() == null) {
+                                built.settingsDao().upsert(ReadingSettingsEntity.default())
+                            }
                         }
                     }
-                }
             }
         }
     }

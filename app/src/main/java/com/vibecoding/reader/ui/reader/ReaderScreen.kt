@@ -255,6 +255,7 @@ fun ReaderScreen(
             ) {
                 ReaderSettingsPanel(
                     settings = settings,
+                    format = book?.format ?: BookFormat.TXT,
                     onChange = viewModel::updateSettings
                 )
                 Spacer(Modifier.height(24.dp))

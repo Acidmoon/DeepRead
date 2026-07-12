@@ -28,13 +28,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
+import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.DefaultThemePresets
 import com.vibecoding.reader.domain.model.PageTurnMode
 import com.vibecoding.reader.domain.model.ReadingSettings
 
+private val PdfBgPresets = listOf(
+    "纯黑" to 0xFF000000L,
+    "深灰" to 0xFF1A1A1AL,
+    "浅灰" to 0xFFE8E8E8L,
+    "白色" to 0xFFFFFFFFL
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReaderSettingsPanel(
+    settings: ReadingSettings,
+    format: BookFormat,
+    onChange: (ReadingSettings) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    when (format) {
+        BookFormat.PDF -> PdfSettingsPanel(settings, onChange, modifier)
+        BookFormat.TXT, BookFormat.DOCX -> TextSettingsPanel(settings, onChange, modifier)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PdfSettingsPanel(
     settings: ReadingSettings,
     onChange: (ReadingSettings) -> Unit,
     modifier: Modifier = Modifier
@@ -44,7 +66,104 @@ fun ReaderSettingsPanel(
             .fillMaxWidth()
             .padding(20.dp)
     ) {
-        Text("阅读设置", style = MaterialTheme.typography.titleMedium)
+        Text("PDF 设置", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "PDF 按原版式全屏渲染，不支持字号与行距。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Text("翻页方式", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            PdfPageModeChip(
+                selected = isHorizontalMode(settings.pdfPageTurnMode) &&
+                    settings.pdfPageTurnMode == PageTurnMode.BOTH,
+                label = "点按+左右滑",
+                onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.BOTH)) }
+            )
+            PdfPageModeChip(
+                selected = settings.pdfPageTurnMode == PageTurnMode.TAP,
+                label = "点按翻页",
+                onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.TAP)) }
+            )
+            PdfPageModeChip(
+                selected = settings.pdfPageTurnMode == PageTurnMode.SLIDE,
+                label = "左右滑动",
+                onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.SLIDE)) }
+            )
+            PdfPageModeChip(
+                selected = settings.pdfPageTurnMode == PageTurnMode.VERTICAL,
+                label = "上下滚动",
+                onClick = { onChange(settings.copy(pdfPageTurnMode = PageTurnMode.VERTICAL)) }
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text("页边背景", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PdfBgPresets.forEach { (name, color) ->
+                val selected = settings.pdfBackgroundColor == color
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(color))
+                        .border(
+                            width = if (selected) 3.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else Color.Gray.copy(alpha = 0.45f),
+                            shape = CircleShape
+                        )
+                        .clickable { onChange(settings.copy(pdfBackgroundColor = color)) },
+                    contentAlignment = Alignment.Center
+                ) {}
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            PdfBgPresets.firstOrNull { it.second == settings.pdfBackgroundColor }?.first ?: "自定义",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+    }
+}
+
+@Composable
+private fun PdfPageModeChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) }
+    )
+}
+
+private fun isHorizontalMode(mode: PageTurnMode): Boolean =
+    mode == PageTurnMode.TAP || mode == PageTurnMode.SLIDE || mode == PageTurnMode.BOTH
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TextSettingsPanel(
+    settings: ReadingSettings,
+    onChange: (ReadingSettings) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(20.dp)
+    ) {
+        Text("文本设置", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
 
         Text("背景", style = MaterialTheme.typography.labelLarge)
