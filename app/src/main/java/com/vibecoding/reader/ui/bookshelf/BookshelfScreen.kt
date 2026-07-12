@@ -73,6 +73,7 @@ import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.ShelfItem
+import com.vibecoding.reader.ui.common.AppBottomStatusBar
 import java.io.File
 
 private val importMimeTypes = arrayOf(
@@ -227,7 +228,13 @@ fun BookshelfScreen(
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 160.dp),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 16.dp,
+                        // 嵌入首页时给底部状态浮层留一点滚动余量
+                        bottom = if (embeddedInHome) 40.dp else 16.dp
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.fillMaxSize()
@@ -286,6 +293,15 @@ fun BookshelfScreen(
                         }
                     }
                 }
+            }
+
+            // 独立文件夹页：底部状态浮层（首页嵌入时由 HomeScreen 统一画）
+            if (!embeddedInHome) {
+                AppBottomStatusBar(
+                    progressPercent = null,
+                    onBackground = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
             }
         }
     }

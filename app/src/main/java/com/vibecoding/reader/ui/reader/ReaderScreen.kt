@@ -10,10 +10,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -77,6 +75,7 @@ import com.vibecoding.reader.domain.model.TocKind
 import com.vibecoding.reader.domain.reader.ReadingProgress
 import com.vibecoding.reader.domain.reader.ScreenDim
 import com.vibecoding.reader.domain.search.TextSearch
+import com.vibecoding.reader.ui.common.AppBottomStatusBar
 import com.vibecoding.reader.ui.reader.pdf.PdfReader
 import com.vibecoding.reader.ui.reader.text.TextReader
 import kotlinx.coroutines.Dispatchers
@@ -130,6 +129,15 @@ fun ReaderScreen(
         as? ReaderPosition.CharOffset)?.offset
     val chapterNav = remember(content.toc, charOffset, book?.format) {
         resolveChapterNav(content.toc, charOffset)
+    }
+
+    val readingReady = book != null && !content.loading && content.error == null
+    val pageBg = remember(book?.format, settings.backgroundColor, settings.pdfBackgroundColor) {
+        when (book?.format) {
+            BookFormat.PDF -> Color(settings.pdfBackgroundColor)
+            null -> Color(settings.backgroundColor)
+            else -> Color(settings.backgroundColor)
+        }
     }
 
     Scaffold(
@@ -300,7 +308,6 @@ fun ReaderScreen(
                                 modifier = Modifier.align(Alignment.TopCenter)
                             )
 
-                            // 底栏：上一章 / 下一章 + 目录 · 书签 · 设置
                             ReaderBottomChrome(
                                 hasChapters = book!!.format.isEbook &&
                                     content.toc.size >= 2,
@@ -323,7 +330,9 @@ fun ReaderScreen(
                                     sheetKind = SheetKind.BOOKMARKS
                                 },
                                 onAddBookmark = {
-                                    val pos = currentPosition.ifBlank { content.initialPosition }
+                                    val pos = currentPosition.ifBlank {
+                                        content.initialPosition
+                                    }
                                     if (pos.isBlank()) {
                                         snackMsg = "暂无位置可收藏"
                                         return@ReaderBottomChrome
@@ -348,12 +357,23 @@ fun ReaderScreen(
                                 onOpenBrightness = {
                                     sheetKind = SheetKind.BRIGHTNESS
                                 },
-                                modifier = Modifier.align(Alignment.BottomCenter)
+                                // 底栏抬高，避开底部状态文字
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 36.dp)
                             )
                         }
                     }
                 }
             }
+
+            // 始终叠在最上层：进度 / 电量 / 时间（无色条，随背景反色）
+            AppBottomStatusBar(
+                progressPercent = if (readingReady) currentProgress else null,
+                onBackground = pageBg,
+                applyNavPadding = true,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 
@@ -452,8 +472,8 @@ private fun ReaderTopChrome(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(bottom = 8.dp)
+                // 系统状态栏已隐藏；保留少量顶边距，避免贴边
+                .padding(top = 8.dp, bottom = 8.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -537,7 +557,7 @@ private fun ReaderBottomChrome(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
+                // 系统导航区由底部 AppBottomStatusBar 承担，此处不再重复 padding
                 .padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
             if (hasChapters) {

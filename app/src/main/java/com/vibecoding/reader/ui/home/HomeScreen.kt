@@ -1,5 +1,6 @@
 package com.vibecoding.reader.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,9 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -39,8 +40,10 @@ import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.ui.bookshelf.BookshelfScreen
 import com.vibecoding.reader.ui.bookshelf.BookshelfViewModel
 import com.vibecoding.reader.ui.bookshelf.ShelfBookCard
+import com.vibecoding.reader.ui.common.AppBottomStatusBar
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     container: AppContainer,
@@ -48,21 +51,40 @@ fun HomeScreen(
     onOpenBook: (String) -> Unit,
     onOpenFolder: (String) -> Unit
 ) {
-    var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("最近阅读", "我的书架")
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
+    val scope = rememberCoroutineScope()
+
+    // ViewModels 提到 Pager 外，避免左右滑时重复创建
+    val recentVm: RecentViewModel = viewModel(
+        factory = RecentViewModel.Factory(container.bookRepository)
+    )
+    val shelfVm: BookshelfViewModel = viewModel(
+        key = "home-shelf-root",
+        factory = BookshelfViewModel.Factory(
+            bookRepository = container.bookRepository,
+            folderRepository = container.folderRepository,
+            shelfRepository = container.shelfRepository,
+            bookImporter = container.bookImporter,
+            folderId = null
+        )
+    )
+    val recent by recentVm.recentBooks.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
             Column(Modifier.fillMaxWidth()) {
-                PrimaryTabRow(selectedTabIndex = tabIndex) {
+                PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
                     tabs.forEachIndexed { index, title ->
                         Tab(
-                            selected = tabIndex == index,
-                            onClick = { tabIndex = index },
+                            selected = pagerState.currentPage == index,
+                            onClick = {
+                                scope.launch { pagerState.animateScrollToPage(index) }
+                            },
                             text = {
                                 Text(
                                     text = title,
-                                    fontWeight = if (tabIndex == index) {
+                                    fontWeight = if (pagerState.currentPage == index) {
                                         FontWeight.SemiBold
                                     } else {
                                         FontWeight.Normal
@@ -75,35 +97,27 @@ fun HomeScreen(
             }
         }
     ) { padding ->
+        // 内容全屏；底部状态叠在内容之上（不占 Scaffold bottomBar 条）
         Box(
-            Modifier
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            when (tabIndex) {
-                0 -> {
-                    val recentVm: RecentViewModel = viewModel(
-                        factory = RecentViewModel.Factory(container.bookRepository)
-                    )
-                    val recent by recentVm.recentBooks.collectAsStateWithLifecycle()
-                    RecentReadingContent(
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = true,
+                beyondViewportPageCount = 1
+            ) { page ->
+                when (page) {
+                    0 -> RecentReadingContent(
                         books = recent,
                         onOpenBook = onOpenBook,
-                        onGoShelf = { tabIndex = 1 }
+                        onGoShelf = {
+                            scope.launch { pagerState.animateScrollToPage(1) }
+                        }
                     )
-                }
-                else -> {
-                    val shelfVm: BookshelfViewModel = viewModel(
-                        key = "home-shelf-root",
-                        factory = BookshelfViewModel.Factory(
-                            bookRepository = container.bookRepository,
-                            folderRepository = container.folderRepository,
-                            shelfRepository = container.shelfRepository,
-                            bookImporter = container.bookImporter,
-                            folderId = null
-                        )
-                    )
-                    BookshelfScreen(
+                    else -> BookshelfScreen(
                         viewModel = shelfVm,
                         onOpenBook = onOpenBook,
                         onOpenFolder = onOpenFolder,
@@ -112,6 +126,11 @@ fun HomeScreen(
                     )
                 }
             }
+            AppBottomStatusBar(
+                progressPercent = null,
+                onBackground = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 }
