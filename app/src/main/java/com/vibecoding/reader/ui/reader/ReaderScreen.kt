@@ -29,8 +29,10 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Slider
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -58,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +74,7 @@ import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.model.TocKind
+import com.vibecoding.reader.domain.reader.ScreenDim
 import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.ui.reader.pdf.PdfReader
 import com.vibecoding.reader.ui.reader.text.TextReader
@@ -82,7 +86,8 @@ private enum class SheetKind {
     TOC,
     BOOKMARKS,
     SETTINGS,
-    SEARCH
+    SEARCH,
+    BRIGHTNESS
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -151,42 +156,55 @@ fun ReaderScreen(
                     }
                 }
                 else -> {
+                    val dimAlpha = ScreenDim.overlayAlpha(settings.screenDim)
                     Box(Modifier.fillMaxSize()) {
-                        when (book!!.format) {
-                            BookFormat.TXT, BookFormat.MD, BookFormat.EPUB, BookFormat.DOCX -> {
-                                TextReader(
-                                    text = content.text,
-                                    toc = content.toc,
-                                    settings = settings,
-                                    initialPosition = content.initialPosition,
-                                    jumpPosition = jumpPosition,
-                                    onJumpConsumed = viewModel::consumeJump,
-                                    onProgress = { pos, progress ->
-                                        currentPosition = pos
-                                        currentProgress = progress
-                                        viewModel.saveProgress(pos, progress)
-                                    },
-                                    onToggleChrome = { showChrome = !showChrome },
-                                    modifier = Modifier.fillMaxSize(),
-                                    blocks = content.blocks,
-                                    markdownSource = content.markdownSource
-                                )
-                            }
-                            BookFormat.PDF -> {
-                                PdfReader(
-                                    filePath = book!!.localPath,
-                                    settings = settings,
-                                    initialPosition = content.initialPosition,
-                                    jumpPosition = jumpPosition,
-                                    onJumpConsumed = viewModel::consumeJump,
-                                    onProgress = { pos, progress, _, _ ->
-                                        currentPosition = pos
-                                        currentProgress = progress
-                                        viewModel.saveProgress(pos, progress)
-                                    },
-                                    onToggleChrome = { showChrome = !showChrome },
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                        // 内容区叠暗：draw 层不拦截触摸
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .drawWithContent {
+                                    drawContent()
+                                    if (dimAlpha > 0.001f) {
+                                        drawRect(Color.Black.copy(alpha = dimAlpha))
+                                    }
+                                }
+                        ) {
+                            when (book!!.format) {
+                                BookFormat.TXT, BookFormat.MD, BookFormat.EPUB, BookFormat.DOCX -> {
+                                    TextReader(
+                                        text = content.text,
+                                        toc = content.toc,
+                                        settings = settings,
+                                        initialPosition = content.initialPosition,
+                                        jumpPosition = jumpPosition,
+                                        onJumpConsumed = viewModel::consumeJump,
+                                        onProgress = { pos, progress ->
+                                            currentPosition = pos
+                                            currentProgress = progress
+                                            viewModel.saveProgress(pos, progress)
+                                        },
+                                        onToggleChrome = { showChrome = !showChrome },
+                                        modifier = Modifier.fillMaxSize(),
+                                        blocks = content.blocks,
+                                        markdownSource = content.markdownSource
+                                    )
+                                }
+                                BookFormat.PDF -> {
+                                    PdfReader(
+                                        filePath = book!!.localPath,
+                                        settings = settings,
+                                        initialPosition = content.initialPosition,
+                                        jumpPosition = jumpPosition,
+                                        onJumpConsumed = viewModel::consumeJump,
+                                        onProgress = { pos, progress, _, _ ->
+                                            currentPosition = pos
+                                            currentProgress = progress
+                                            viewModel.saveProgress(pos, progress)
+                                        },
+                                        onToggleChrome = { showChrome = !showChrome },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
                         }
 
@@ -252,6 +270,9 @@ fun ReaderScreen(
                                 onOpenSearch = {
                                     sheetKind = SheetKind.SEARCH
                                 },
+                                onOpenBrightness = {
+                                    sheetKind = SheetKind.BRIGHTNESS
+                                },
                                 modifier = Modifier.align(Alignment.BottomCenter)
                             )
                         }
@@ -286,6 +307,22 @@ fun ReaderScreen(
                         viewModel.jumpTo(hit.position)
                         sheetKind = null
                         showChrome = false
+                    }
+                )
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+        SheetKind.BRIGHTNESS -> {
+            ModalBottomSheet(
+                onDismissRequest = { sheetKind = null },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                BrightnessSheet(
+                    screenDim = settings.screenDim,
+                    onChange = { dim ->
+                        viewModel.updateSettings(
+                            settings.copy(screenDim = ScreenDim.clamp(dim))
+                        )
                     }
                 )
                 Spacer(Modifier.height(24.dp))
@@ -401,6 +438,7 @@ private fun ReaderBottomChrome(
     onOpenSettings: () -> Unit,
     showSearch: Boolean = false,
     onOpenSearch: () -> Unit = {},
+    onOpenBrightness: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -491,11 +529,52 @@ private fun ReaderBottomChrome(
                     onClick = onAddBookmark
                 )
                 BottomAction(
+                    icon = Icons.Default.BrightnessMedium,
+                    label = "亮度",
+                    onClick = onOpenBrightness
+                )
+                BottomAction(
                     icon = Icons.Default.Settings,
                     label = "设置",
                     onClick = onOpenSettings
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun BrightnessSheet(
+    screenDim: Float,
+    onChange: (Float) -> Unit
+) {
+    val percent = ScreenDim.toPercent(screenDim)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(20.dp)
+    ) {
+        Text("阅读亮度（应用内）", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "当前约 $percent%（不修改系统亮度，夜间可调暗护眼）",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(Modifier.height(16.dp))
+        Slider(
+            value = percent.toFloat(),
+            onValueChange = { p ->
+                onChange(ScreenDim.fromBrightnessPercent(p.toInt()))
+            },
+            valueRange = 30f..100f
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("暗", style = MaterialTheme.typography.labelMedium)
+            Text("亮", style = MaterialTheme.typography.labelMedium)
         }
     }
 }

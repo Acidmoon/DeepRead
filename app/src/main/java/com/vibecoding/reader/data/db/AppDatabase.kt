@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
         BookmarkEntity::class,
         ReadingSettingsEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

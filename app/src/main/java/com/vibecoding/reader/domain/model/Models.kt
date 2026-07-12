@@ -201,6 +201,11 @@ data class ReadingSettings(
     val pageTurnMode: PageTurnMode = PageTurnMode.VERTICAL,
     val horizontalPaddingDp: Float = 24f,
     val verticalPaddingDp: Float = 20f,
+    /**
+     * 应用内屏幕变暗程度 0~0.7（叠黑层，不改系统亮度）。
+     * 由 [com.vibecoding.reader.domain.reader.ScreenDim] 做 clamp。
+     */
+    val screenDim: Float = 0f,
     // —— PDF（与电子书设置分离）——
     val pdfPageTurnMode: PageTurnMode = PageTurnMode.BOTH,
     val pdfBackgroundColor: Long = 0xFF000000

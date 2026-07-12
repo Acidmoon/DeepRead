@@ -147,7 +147,8 @@ data class ReadingSettingsEntity(
     val horizontalPaddingDp: Float,
     val verticalPaddingDp: Float,
     val pdfPageTurnMode: String = PageTurnMode.BOTH.name,
-    val pdfBackgroundColor: Long = 0xFF000000
+    val pdfBackgroundColor: Long = 0xFF000000,
+    val screenDim: Float = 0f
 ) {
     fun toDomain(): ReadingSettings = ReadingSettings(
         backgroundColor = backgroundColor,
@@ -158,6 +159,7 @@ data class ReadingSettingsEntity(
             .getOrDefault(PageTurnMode.BOTH),
         horizontalPaddingDp = horizontalPaddingDp,
         verticalPaddingDp = verticalPaddingDp,
+        screenDim = screenDim,
         pdfPageTurnMode = runCatching { PageTurnMode.valueOf(pdfPageTurnMode) }
             .getOrDefault(PageTurnMode.BOTH),
         pdfBackgroundColor = pdfBackgroundColor
@@ -174,7 +176,8 @@ data class ReadingSettingsEntity(
             horizontalPaddingDp = settings.horizontalPaddingDp,
             verticalPaddingDp = settings.verticalPaddingDp,
             pdfPageTurnMode = settings.pdfPageTurnMode.name,
-            pdfBackgroundColor = settings.pdfBackgroundColor
+            pdfBackgroundColor = settings.pdfBackgroundColor,
+            screenDim = settings.screenDim
         )
 
         fun default() = fromDomain(ReadingSettings())
