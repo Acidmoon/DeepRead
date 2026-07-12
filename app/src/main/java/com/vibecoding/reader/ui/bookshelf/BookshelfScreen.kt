@@ -1,8 +1,10 @@
 package com.vibecoding.reader.ui.bookshelf
 
+import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,12 +50,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vibecoding.reader.data.import.CoverGenerator
 import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFormat
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -225,7 +233,27 @@ private fun BookCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
-    val coverColors = coverBrush(book.format)
+    val bookDir = remember(book.localPath) { CoverGenerator.bookDirOf(book.localPath) }
+    val coverFile = remember(book.coverPath, bookDir) {
+        when {
+            !book.coverPath.isNullOrBlank() && File(book.coverPath).exists() ->
+                File(book.coverPath)
+            bookDir != null && CoverGenerator.coverFile(bookDir).exists() ->
+                CoverGenerator.coverFile(bookDir)
+            else -> null
+        }
+    }
+    val excerpt = remember(book.id, bookDir, book.coverPath) {
+        CoverGenerator.loadExcerpt(bookDir)
+    }
+    val coverBitmap = remember(coverFile?.absolutePath, coverFile?.lastModified()) {
+        coverFile?.let { file ->
+            runCatching {
+                BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -238,29 +266,66 @@ private fun BookCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(0.72f)
-                    .background(coverColors)
-                    .padding(14.dp)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
             ) {
-                Text(
-                    text = book.format.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.9f),
+                when {
+                    coverBitmap != null -> {
+                        Image(
+                            bitmap = coverBitmap,
+                            contentDescription = "${book.title} 封面",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        // 底部渐变，保证标题可读
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp)
+                                .align(Alignment.BottomCenter)
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))
+                                    )
+                                )
+                        )
+                        Text(
+                            text = book.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(10.dp)
+                        )
+                    }
+                    // 无图时：文本类展示节选，PDF 显示占位
+                    !excerpt.isNullOrBlank() && book.format != BookFormat.PDF -> {
+                        TextExcerptCover(
+                            title = book.title,
+                            excerpt = excerpt,
+                            format = book.format,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    else -> {
+                        FallbackCover(
+                            title = book.title,
+                            format = book.format,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                FormatBadge(
+                    format = book.format,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(alpha = 0.25f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-                Text(
-                    text = book.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.BottomStart)
+                        .padding(8.dp)
                 )
             }
+
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
                     book.title,
@@ -286,6 +351,98 @@ private fun BookCard(
             }
         }
     }
+}
+
+@Composable
+private fun TextExcerptCover(
+    title: String,
+    excerpt: String,
+    format: BookFormat,
+    modifier: Modifier = Modifier
+) {
+    val bg = when (format) {
+        BookFormat.TXT -> listOf(Color(0xFFEEF4FF), Color(0xFFD6E6FF))
+        BookFormat.DOCX -> listOf(Color(0xFFE8F7FC), Color(0xFFCDECF7))
+        else -> listOf(Color(0xFFF5F5F5), Color(0xFFE0E0E0))
+    }
+    Box(
+        modifier = modifier.background(Brush.verticalGradient(bg))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFFFFFCF5))
+                .padding(12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(Color(0x332563EB))
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = excerpt,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Serif,
+                color = Color(0xFF334155),
+                lineHeight = 16.sp,
+                maxLines = 10,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun FallbackCover(
+    title: String,
+    format: BookFormat,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .background(coverBrush(format))
+            .padding(14.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.BottomStart)
+        )
+    }
+}
+
+@Composable
+private fun FormatBadge(
+    format: BookFormat,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = format.name,
+        style = MaterialTheme.typography.labelMedium,
+        color = Color.White.copy(alpha = 0.95f),
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.35f))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    )
 }
 
 private fun coverBrush(format: BookFormat): Brush {

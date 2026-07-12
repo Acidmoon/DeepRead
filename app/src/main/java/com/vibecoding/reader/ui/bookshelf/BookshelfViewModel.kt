@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Collections
 
 data class BookshelfUiState(
     val isImporting: Boolean = false,
@@ -31,11 +32,29 @@ class BookshelfViewModel(
     private val _ui = MutableStateFlow(BookshelfUiState())
     val ui: StateFlow<BookshelfUiState> = _ui.asStateFlow()
 
+    private val coverEnsuredIds = Collections.synchronizedSet(mutableSetOf<String>())
+
+    init {
+        // 旧书缺封面时后台补齐（PDF 首页 / 文本节选封面）
+        viewModelScope.launch {
+            books.collect { list ->
+                list.forEach { book ->
+                    if (coverEnsuredIds.add(book.id)) {
+                        launch {
+                            runCatching { bookImporter.ensureBookCover(book) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun import(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
             _ui.update { it.copy(isImporting = true, message = null) }
             val result = bookImporter.importUris(uris)
+            result.books.forEach { coverEnsuredIds.add(it.id) }
             val msg = buildString {
                 if (result.books.isNotEmpty()) {
                     append("已导入 ${result.books.size} 本")
@@ -53,6 +72,7 @@ class BookshelfViewModel(
     fun delete(book: Book) {
         viewModelScope.launch {
             bookRepository.deleteBook(book)
+            coverEnsuredIds.remove(book.id)
             _ui.update { it.copy(message = "已删除「${book.title}」") }
         }
     }

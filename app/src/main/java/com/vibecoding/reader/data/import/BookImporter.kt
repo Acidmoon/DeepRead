@@ -63,6 +63,13 @@ class BookImporter(
         val toc = extractToc(format, dest)
         saveToc(dir, toc)
 
+        val cover = CoverGenerator.ensureCover(
+            format = format,
+            localFile = dest,
+            bookDir = dir,
+            title = title
+        )
+
         val now = System.currentTimeMillis()
         val book = Book(
             id = bookId,
@@ -70,6 +77,7 @@ class BookImporter(
             format = format,
             sourceUri = uri.toString(),
             localPath = dest.absolutePath,
+            coverPath = cover.coverPath,
             addedAt = now,
             lastOpenedAt = 0L,
             lastPosition = "",
@@ -78,6 +86,32 @@ class BookImporter(
         )
         bookRepository.upsert(book)
         return book
+    }
+
+    /**
+     * 为旧书补生成封面（书架展示用），已有封面则跳过。
+     */
+    suspend fun ensureBookCover(book: Book): Book = withContext(Dispatchers.IO) {
+        val coverPath = book.coverPath
+        if (!coverPath.isNullOrBlank() && File(coverPath).exists()) {
+            return@withContext book
+        }
+        val dir = CoverGenerator.bookDirOf(book.localPath) ?: return@withContext book
+        val local = File(book.localPath)
+        if (!local.exists()) return@withContext book
+        val result = CoverGenerator.ensureCover(
+            format = book.format,
+            localFile = local,
+            bookDir = dir,
+            title = book.title
+        )
+        if (result.coverPath.isNullOrBlank()) return@withContext book
+        val updated = book.copy(
+            coverPath = result.coverPath,
+            updatedAt = System.currentTimeMillis()
+        )
+        bookRepository.upsert(updated)
+        updated
     }
 
     private fun extractToc(format: BookFormat, file: File): List<TocEntry> {
