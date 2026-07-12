@@ -105,6 +105,7 @@ fun BookshelfScreen(
     var pendingFolderAction by remember { mutableStateOf<BookFolder?>(null) }
     var showCreateFolder by remember { mutableStateOf(false) }
     var renameFolder by remember { mutableStateOf<BookFolder?>(null) }
+    var renameBook by remember { mutableStateOf<Book?>(null) }
     var moveBook by remember { mutableStateOf<Book?>(null) }
     var fabMenu by remember { mutableStateOf(false) }
 
@@ -289,7 +290,7 @@ fun BookshelfScreen(
         }
     }
 
-    // 删除书籍
+    // 书籍长按：重命名 / 移动 / 删除
     pendingDeleteBook?.let { book ->
         AlertDialog(
             onDismissRequest = { pendingDeleteBook = null },
@@ -297,10 +298,14 @@ fun BookshelfScreen(
             text = {
                 Column {
                     TextButton(onClick = {
+                        renameBook = book
+                        pendingDeleteBook = null
+                    }) { Text("重命名") }
+                    TextButton(onClick = {
                         moveBook = book
                         pendingDeleteBook = null
-                    }) { Text(if (inFolder) "移出文件夹 / 移动…" else "移入文件夹…") }
-                    Text("或删除此书？书签与本地副本将一并清除。")
+                    }) { Text(if (inFolder) "移出 / 移到其他文件夹…" else "移入文件夹…") }
+                    Text("删除将清除书签与本地副本。", style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = {
@@ -311,6 +316,18 @@ fun BookshelfScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeleteBook = null }) { Text("取消") }
+            }
+        )
+    }
+
+    renameBook?.let { book ->
+        FolderNameDialog(
+            title = "重命名书籍",
+            initial = book.title,
+            onDismiss = { renameBook = null },
+            onConfirm = {
+                viewModel.renameBook(book, it)
+                renameBook = null
             }
         )
     }

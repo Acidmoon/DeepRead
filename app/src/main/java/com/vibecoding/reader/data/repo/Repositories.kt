@@ -13,6 +13,7 @@ import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.ShelfItem
+import com.vibecoding.reader.domain.reader.BookOrganize
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -117,6 +118,13 @@ class BookRepository(
         val now = System.currentTimeMillis()
         bookDao.moveToFolder(bookId, folderId, now)
         folderId?.let { folderDao?.touch(it, now) }
+    }
+
+    suspend fun renameBook(bookId: String, newTitle: String): Book? {
+        val book = getBook(bookId) ?: return null
+        val updated = BookOrganize.renamed(book, newTitle)
+        upsert(updated)
+        return updated
     }
 
     suspend fun deleteBook(book: Book) {

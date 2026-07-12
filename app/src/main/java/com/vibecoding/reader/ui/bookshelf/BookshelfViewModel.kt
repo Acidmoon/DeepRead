@@ -216,6 +216,18 @@ class BookshelfViewModel(
         }
     }
 
+    fun renameBook(book: Book, newTitle: String) {
+        viewModelScope.launch {
+            runCatching {
+                bookRepository.renameBook(book.id, newTitle)
+            }.onSuccess {
+                _ui.update { it.copy(message = "已重命名为「${newTitle.trim()}」") }
+            }.onFailure { e ->
+                _ui.update { it.copy(message = e.message ?: "重命名失败") }
+            }
+        }
+    }
+
     fun consumeMessage() {
         _ui.update { it.copy(message = null) }
     }
