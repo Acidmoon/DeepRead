@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -51,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,13 +71,18 @@ import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.model.TocKind
+import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.ui.reader.pdf.PdfReader
 import com.vibecoding.reader.ui.reader.text.TextReader
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class SheetKind {
     TOC,
     BOOKMARKS,
-    SETTINGS
+    SETTINGS,
+    SEARCH
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -240,6 +248,10 @@ fun ReaderScreen(
                                 onOpenSettings = {
                                     sheetKind = SheetKind.SETTINGS
                                 },
+                                showSearch = book!!.format.isEbook,
+                                onOpenSearch = {
+                                    sheetKind = SheetKind.SEARCH
+                                },
                                 modifier = Modifier.align(Alignment.BottomCenter)
                             )
                         }
@@ -259,6 +271,22 @@ fun ReaderScreen(
                     settings = settings,
                     format = book?.format ?: BookFormat.TXT,
                     onChange = viewModel::updateSettings
+                )
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+        SheetKind.SEARCH -> {
+            ModalBottomSheet(
+                onDismissRequest = { sheetKind = null },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                SearchSheet(
+                    text = content.text,
+                    onHit = { hit ->
+                        viewModel.jumpTo(hit.position)
+                        sheetKind = null
+                        showChrome = false
+                    }
                 )
                 Spacer(Modifier.height(24.dp))
             }
@@ -371,6 +399,8 @@ private fun ReaderBottomChrome(
     onOpenBookmarks: () -> Unit,
     onAddBookmark: () -> Unit,
     onOpenSettings: () -> Unit,
+    showSearch: Boolean = false,
+    onOpenSearch: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -443,6 +473,13 @@ private fun ReaderBottomChrome(
                     label = "目录",
                     onClick = onOpenToc
                 )
+                if (showSearch) {
+                    BottomAction(
+                        icon = Icons.Default.Search,
+                        label = "搜索",
+                        onClick = onOpenSearch
+                    )
+                }
                 BottomAction(
                     icon = Icons.Default.Bookmark,
                     label = "书签",
@@ -458,6 +495,99 @@ private fun ReaderBottomChrome(
                     label = "设置",
                     onClick = onOpenSettings
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchSheet(
+    text: String,
+    onHit: (TextSearch.Hit) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var hits by remember { mutableStateOf<List<TextSearch.Hit>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(460.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text("全文搜索", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text("关键词") },
+            modifier = Modifier.fillMaxWidth(),
+            trailingIcon = {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            searching = true
+                            hits = withContext(Dispatchers.Default) {
+                                TextSearch.search(text, query)
+                            }
+                            searching = false
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = "搜索")
+                }
+            }
+        )
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = {
+                scope.launch {
+                    searching = true
+                    hits = withContext(Dispatchers.Default) {
+                        TextSearch.search(text, query)
+                    }
+                    searching = false
+                }
+            },
+            enabled = query.isNotBlank() && !searching
+        ) { Text(if (searching) "搜索中…" else "搜索") }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            when {
+                searching -> "正在搜索…"
+                query.isBlank() -> "输入关键词后点击搜索"
+                hits.isEmpty() -> "无匹配结果"
+                else -> "共 ${hits.size} 处（最多显示 100）"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(hits, key = { "${it.offset}-${it.snippet}" }) { hit ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onHit(hit) }
+                        .padding(vertical = 12.dp)
+                ) {
+                    Text(
+                        hit.snippet,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "位置 ${hit.offset}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(0.4f))
             }
         }
     }
