@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -75,6 +76,9 @@ private fun PdfSettingsPanel(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
+
+        Spacer(Modifier.height(16.dp))
+        ReadingComfortSection(settings = settings, onChange = onChange)
 
         Spacer(Modifier.height(20.dp))
         Text("翻页方式", style = MaterialTheme.typography.labelLarge)
@@ -207,7 +211,9 @@ private fun TextSettingsPanel(
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
         Spacer(Modifier.height(16.dp))
+        ReadingComfortSection(settings = settings, onChange = onChange)
 
+        Spacer(Modifier.height(16.dp))
         Text("背景", style = MaterialTheme.typography.labelLarge)
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -321,6 +327,67 @@ private fun TextSettingsPanel(
                 )
             )
         }
+    }
+}
+
+/**
+ * 电子书 / PDF 共用：阅读不息屏、底部状态浮层显隐。
+ */
+@Composable
+private fun ReadingComfortSection(
+    settings: ReadingSettings,
+    onChange: (ReadingSettings) -> Unit
+) {
+    Text("阅读时", style = MaterialTheme.typography.labelLarge)
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = "自动翻页开启时始终保持亮屏",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    )
+    Spacer(Modifier.height(8.dp))
+    ReadingToggleRow(
+        label = "阅读时保持亮屏",
+        checked = settings.keepScreenOn,
+        onCheckedChange = { onChange(settings.copy(keepScreenOn = it)) }
+    )
+    ReadingToggleRow(
+        label = "显示底部状态栏",
+        checked = settings.showStatusOverlay,
+        onCheckedChange = { onChange(settings.copy(showStatusOverlay = it)) }
+    )
+    if (!settings.showStatusOverlay) {
+        Text(
+            text = "已隐藏；长按状态栏也可关闭",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun ReadingToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 

@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
         BookmarkEntity::class,
         ReadingSettingsEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -101,6 +101,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // v8：阅读不息屏 + 底部状态浮层可隐
+                db.execSQL(
+                    "ALTER TABLE reading_settings ADD COLUMN keepScreenOn INTEGER NOT NULL DEFAULT 1"
+                )
+                db.execSQL(
+                    "ALTER TABLE reading_settings ADD COLUMN showStatusOverlay INTEGER NOT NULL DEFAULT 1"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -111,7 +123,8 @@ abstract class AppDatabase : RoomDatabase() {
                     // 正常升级走上面的迁移；仅对无迁移路径的异常旧库兜底重建
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                        MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+                        MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                        MIGRATION_7_8
                     )
                     .fallbackToDestructiveMigration()
                     .addCallback(object : Callback() {

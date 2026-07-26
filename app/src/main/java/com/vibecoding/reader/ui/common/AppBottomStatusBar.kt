@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,27 +26,36 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.vibecoding.reader.domain.reader.StatusOverlayTitle
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * 应用底部状态浮层：左侧阅读进度，右侧电量 + 日期时间。
+ * 应用底部状态浮层：左侧章节名/进度，右侧电量 + 日期时间。
  * 无背景条，叠在内容之上；浅底黑字 / 深底白字。
+ *
+ * @param progressPercent 0~1 阅读进度；null 表示非阅读场景（显示品牌名）
+ * @param chapterTitle 当前章节/大纲标题；与进度同时有时显示「标题 · xx%」
+ * @param onLongPressHide 长按隐藏回调（仅阅读页传入）；首页/书架不传
  */
 @Composable
 fun AppBottomStatusBar(
     progressPercent: Float? = null,
+    chapterTitle: String? = null,
     modifier: Modifier = Modifier,
     onBackground: Color? = null,
     contentColor: Color? = null,
-    applyNavPadding: Boolean = true
+    applyNavPadding: Boolean = true,
+    onLongPressHide: (() -> Unit)? = null
 ) {
     val battery = rememberBatteryPercent()
     var nowText by remember { mutableStateOf(formatNow()) }
@@ -61,23 +71,37 @@ fun AppBottomStatusBar(
         ?: onBackground?.let { contrastOn(it) }
         ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
 
+    val leftText = StatusOverlayTitle.buildLeftLabel(progressPercent, chapterTitle)
+
     Row(
         modifier = modifier
             .fillMaxWidth()
             .zIndex(8f)
             .then(if (applyNavPadding) Modifier.navigationBarsPadding() else Modifier)
             // 总内容高度约 ReadingLayout.statusOverlayContentHeight（8+13sp+8）
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .then(
+                if (onLongPressHide != null) {
+                    Modifier.pointerInput(onLongPressHide) {
+                        detectTapGestures(onLongPress = { onLongPressHide() })
+                    }
+                } else {
+                    Modifier
+                }
+            ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = progressPercent?.let {
-                "进度 ${(it.coerceIn(0f, 1f) * 100).toInt()}%"
-            } ?: "DeepRead",
+            text = leftText,
             color = fg,
             fontSize = 13.sp,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 12.dp)
         )
         Text(
             text = buildString {
@@ -87,7 +111,8 @@ fun AppBottomStatusBar(
             },
             color = fg,
             fontSize = 13.sp,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
         )
     }
 }

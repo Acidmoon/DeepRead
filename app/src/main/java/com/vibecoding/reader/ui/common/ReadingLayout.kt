@@ -12,13 +12,14 @@ import androidx.compose.ui.unit.dp
 /**
  * 阅读页布局度量：正文安全区与底部状态浮层对齐。
  *
- * 正文底边 = 用户版心边距 + [statusOverlayContentHeight] + 系统导航 inset，
+ * 浮层可见时：正文底边 = 用户版心边距 + [statusOverlayContentHeight] + 系统导航 inset，
  * 避免竖滑末行 / 分页末行被 [AppBottomStatusBar] 挡住。
+ * 浮层隐藏时：只保留系统导航 inset。
  */
 object ReadingLayout {
     /**
      * 底部状态浮层内容高度（字号 + 上下 padding），不含系统导航条。
-     * 与 [AppBottomStatusBar] 视觉保持一致。
+     * 与 [AppBottomStatusBar] 视觉保持一致；仅在浮层可见时计入安全区。
      */
     val statusOverlayContentHeight: Dp = 32.dp
 
@@ -27,22 +28,27 @@ object ReadingLayout {
 }
 
 /**
- * 阅读正文底部安全 inset：状态浮层 + 系统导航/手势条。
- * 菜单 chrome 可覆盖状态浮层；正文始终为浮层留空。
+ * 阅读正文底部安全 inset。
+ *
+ * @param includeStatusOverlay 是否为底部状态浮层预留高度；与设置 [showStatusOverlay] 同步
  */
 @Composable
-fun rememberReadingBottomSafeInset(): Dp {
+fun rememberReadingBottomSafeInset(includeStatusOverlay: Boolean = true): Dp {
     val navBottom = WindowInsets.navigationBars
         .asPaddingValues()
         .calculateBottomPadding()
-    return remember(navBottom) {
-        navBottom + ReadingLayout.statusOverlayContentHeight
+    return remember(navBottom, includeStatusOverlay) {
+        if (includeStatusOverlay) {
+            navBottom + ReadingLayout.statusOverlayContentHeight
+        } else {
+            navBottom
+        }
     }
 }
 
 @Composable
-fun rememberReadingBottomSafeInsetPx(): Int {
-    val inset = rememberReadingBottomSafeInset()
+fun rememberReadingBottomSafeInsetPx(includeStatusOverlay: Boolean = true): Int {
+    val inset = rememberReadingBottomSafeInset(includeStatusOverlay)
     val density = LocalDensity.current
     return with(density) { inset.roundToPx() }
 }

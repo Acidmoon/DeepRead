@@ -81,6 +81,7 @@ import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.model.TocKind
 import com.vibecoding.reader.domain.reader.ReadingProgress
 import com.vibecoding.reader.domain.reader.ScreenDim
+import com.vibecoding.reader.domain.reader.StatusOverlayTitle
 import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.ui.common.AppBottomStatusBar
 import com.vibecoding.reader.ui.common.rememberReadingBottomSafeInset
@@ -134,11 +135,12 @@ fun ReaderScreen(
         }
     }
 
-    // 自动翻页时禁止息屏；关闭自动翻页或离开阅读页后恢复系统休眠策略
+    // 阅读不息屏：设置开启或自动翻页时保持亮屏；离开阅读页后恢复
     val view = LocalView.current
-    DisposableEffect(settings.autoPageTurnEnabled, view) {
+    val wantKeepOn = settings.keepScreenOn || settings.autoPageTurnEnabled
+    DisposableEffect(wantKeepOn, view) {
         val previous = view.keepScreenOn
-        view.keepScreenOn = settings.autoPageTurnEnabled
+        view.keepScreenOn = wantKeepOn
         onDispose {
             view.keepScreenOn = previous
         }
@@ -146,8 +148,19 @@ fun ReaderScreen(
 
     val charOffset = (ReaderPosition.parse(currentPosition.ifBlank { content.initialPosition })
         as? ReaderPosition.CharOffset)?.offset
+    val pdfPageIndex = (ReaderPosition.parse(currentPosition.ifBlank { content.initialPosition })
+        as? ReaderPosition.PageIndex)?.page
     val chapterNav = remember(content.toc, charOffset, book?.format) {
         resolveChapterNav(content.toc, charOffset)
+    }
+    // 状态浮层左侧章节名：电子书用章，PDF 用大纲
+    val overlayChapterTitle = remember(book?.format, content.toc, charOffset, pdfPageIndex) {
+        when (book?.format) {
+            BookFormat.PDF -> StatusOverlayTitle.forPdf(content.toc, pdfPageIndex)
+            BookFormat.TXT, BookFormat.MD, BookFormat.EPUB, BookFormat.DOCX ->
+                StatusOverlayTitle.forEbook(content.toc, charOffset)
+            null -> null
+        }
     }
 
     val readingReady = book != null && !content.loading && content.error == null
@@ -158,8 +171,9 @@ fun ReaderScreen(
             else -> Color(settings.backgroundColor)
         }
     }
-    // 正文底边安全区：避开状态浮层（菜单可盖住浮层，正文始终留白）
-    val bottomSafeInset = rememberReadingBottomSafeInset()
+    // 正文底边安全区：浮层可见时避开状态浮层；隐藏时只留系统导航
+    val showStatusOverlay = settings.showStatusOverlay
+    val bottomSafeInset = rememberReadingBottomSafeInset(includeStatusOverlay = showStatusOverlay)
     val pauseAutoTurn = showChrome || sheetKind != null
 
     fun toggleAutoPageTurn() {
@@ -413,15 +427,22 @@ fun ReaderScreen(
                 }
             }
 
-            // 状态浮层 zIndex 低于菜单，唤起菜单时可被底栏覆盖
-            AppBottomStatusBar(
-                progressPercent = if (readingReady) currentProgress else null,
-                onBackground = pageBg,
-                applyNavPadding = true,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .zIndex(1f)
-            )
+            // 状态浮层 zIndex 低于菜单；可设置隐藏；长按快捷关闭
+            if (showStatusOverlay) {
+                AppBottomStatusBar(
+                    progressPercent = if (readingReady) currentProgress else null,
+                    chapterTitle = if (readingReady) overlayChapterTitle else null,
+                    onBackground = pageBg,
+                    applyNavPadding = true,
+                    onLongPressHide = {
+                        viewModel.updateSettings(settings.copy(showStatusOverlay = false))
+                        snackMsg = "已隐藏状态栏，可在设置中开启"
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .zIndex(1f)
+                )
+            }
         }
     }
 

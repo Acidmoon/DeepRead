@@ -218,6 +218,16 @@ data class ReadingSettings(
     val autoPageIntervalSec: Float = 8f,
     /** 竖滑自动滚动速度（行/秒） */
     val autoScrollLinesPerSec: Float = 1.2f,
+    /**
+     * 阅读页保持亮屏（与自动翻页无关）。
+     * 自动翻页开启时仍强制亮屏，避免翻页中途熄屏。
+     */
+    val keepScreenOn: Boolean = true,
+    /**
+     * 阅读页是否显示底部状态浮层（进度 / 章节 / 电量时间）。
+     * 关闭后正文底边安全区不再为浮层留白。
+     */
+    val showStatusOverlay: Boolean = true,
     // —— PDF（与电子书设置分离）——
     val pdfPageTurnMode: PageTurnMode = PageTurnMode.BOTH,
     val pdfBackgroundColor: Long = 0xFF000000,

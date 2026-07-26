@@ -155,7 +155,9 @@ data class ReadingSettingsEntity(
     val autoPageTurnEnabled: Boolean = false,
     val autoPageIntervalSec: Float = 8f,
     val autoScrollLinesPerSec: Float = 1.2f,
-    val pdfRightToLeft: Boolean = false
+    val pdfRightToLeft: Boolean = false,
+    val keepScreenOn: Boolean = true,
+    val showStatusOverlay: Boolean = true
 ) {
     fun toDomain(): ReadingSettings = ReadingSettings(
         backgroundColor = backgroundColor,
@@ -170,6 +172,8 @@ data class ReadingSettingsEntity(
         autoPageTurnEnabled = autoPageTurnEnabled,
         autoPageIntervalSec = autoPageIntervalSec,
         autoScrollLinesPerSec = autoScrollLinesPerSec,
+        keepScreenOn = keepScreenOn,
+        showStatusOverlay = showStatusOverlay,
         pdfPageTurnMode = runCatching { PageTurnMode.valueOf(pdfPageTurnMode) }
             .getOrDefault(PageTurnMode.BOTH),
         pdfBackgroundColor = pdfBackgroundColor,
@@ -192,7 +196,9 @@ data class ReadingSettingsEntity(
             autoPageTurnEnabled = settings.autoPageTurnEnabled,
             autoPageIntervalSec = settings.autoPageIntervalSec,
             autoScrollLinesPerSec = settings.autoScrollLinesPerSec,
-            pdfRightToLeft = settings.pdfRightToLeft
+            pdfRightToLeft = settings.pdfRightToLeft,
+            keepScreenOn = settings.keepScreenOn,
+            showStatusOverlay = settings.showStatusOverlay
         )
 
         fun default() = fromDomain(ReadingSettings())
