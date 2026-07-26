@@ -93,7 +93,7 @@ class ReaderViewModel(
     private suspend fun loadContent(book: Book) {
         val file = File(book.localPath)
         val size = BookLoadGuard.fileSize(file)
-        val pre = BookLoadGuard.precheck(file)
+        val pre = BookLoadGuard.precheck(file, book.format)
         if (pre != null) {
             _content.update {
                 it.copy(loading = false, loadingMessage = null, error = pre)

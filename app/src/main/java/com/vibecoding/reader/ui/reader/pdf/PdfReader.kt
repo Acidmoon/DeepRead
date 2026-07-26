@@ -52,6 +52,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
@@ -295,10 +296,12 @@ private fun openPdfEngine(context: Context, filePath: String, password: String?)
     }
     PdfOutlineParser.ensureInitialized(context)
     return try {
+        // 大文件用磁盘暂存而非内存，防止扫描版大 PDF 撑爆 RAM
+        val memory = MemoryUsageSetting.setupTempFileOnly()
         val doc = if (password == null) {
-            PDDocument.load(file)
+            PDDocument.load(file, memory)
         } else {
-            PDDocument.load(file, password)
+            PDDocument.load(file, password, memory)
         }
         PdfOpenResult.Success(PdfBoxEngine(doc))
     } catch (e: InvalidPasswordException) {

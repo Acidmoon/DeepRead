@@ -1,6 +1,7 @@
 package com.vibecoding.reader.data.parser
 
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
 import com.vibecoding.reader.domain.model.ReaderPosition
@@ -24,7 +25,8 @@ object PdfOutlineParser {
 
     fun parseOutline(file: File, pageCount: Int): List<TocEntry> {
         return runCatching {
-            PDDocument.load(file).use { doc ->
+            // 大文件用磁盘暂存而非内存
+            PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { doc ->
                 val bookmarks = doc.documentCatalog?.documentOutline ?: return emptyList()
                 val result = mutableListOf<TocEntry>()
                 var item = bookmarks.firstChild

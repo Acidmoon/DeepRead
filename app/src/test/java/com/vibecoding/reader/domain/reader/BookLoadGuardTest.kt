@@ -1,5 +1,6 @@
 package com.vibecoding.reader.domain.reader
 
+import com.vibecoding.reader.domain.model.BookFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -41,6 +42,37 @@ class BookLoadGuardTest {
         val f = File.createTempFile("okbook", ".txt")
         f.writeText("hello world content")
         assertNull(BookLoadGuard.precheck(f))
+        f.delete()
+    }
+
+    /** 造一个稀疏大文件，避免测试真的写几十 MB 数据 */
+    private fun sparseFile(suffix: String, bytes: Long): File {
+        val f = File.createTempFile("bigbook", suffix)
+        java.io.RandomAccessFile(f, "rw").use { it.setLength(bytes) }
+        return f
+    }
+
+    @Test
+    fun precheckLargeEbookRejected() {
+        val f = sparseFile(".txt", BookLoadGuard.HARD_LIMIT_BYTES + 1)
+        val err = BookLoadGuard.precheck(f, BookFormat.TXT)
+        assertNotNull(err)
+        assertTrue(err!!.contains("过大"))
+        f.delete()
+    }
+
+    @Test
+    fun precheckLargePdfAllowed() {
+        // PDF 按页流式渲染，超过 64MB 也可打开
+        val f = sparseFile(".pdf", BookLoadGuard.HARD_LIMIT_BYTES + 1)
+        assertNull(BookLoadGuard.precheck(f, BookFormat.PDF))
+        f.delete()
+    }
+
+    @Test
+    fun precheckHugePdfStillRejected() {
+        val f = sparseFile(".pdf", BookLoadGuard.PDF_HARD_LIMIT_BYTES + 1)
+        assertNotNull(BookLoadGuard.precheck(f, BookFormat.PDF))
         f.delete()
     }
 
