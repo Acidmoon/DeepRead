@@ -1,5 +1,10 @@
 package com.vibecoding.reader.ui.reader
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -292,8 +297,15 @@ fun ReaderScreen(
                             }
                         }
 
-                        if (showChrome) {
-                            // 顶栏：返回 + 居中书名 + 进度（盖在内容之上）
+                        // 顶栏：滑入 + 淡入唤起，替代生硬的出现/消失
+                        AnimatedVisibility(
+                            visible = showChrome,
+                            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .zIndex(2f)
+                        ) {
                             val isEbook = book!!.format.isEbook
                             val textLen = content.text.length
                             val canSeekEbook = isEbook && textLen > 0
@@ -354,13 +366,19 @@ fun ReaderScreen(
                                         viewModel.saveProgress(pos, p)
                                     }
                                     else -> null
-                                },
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .zIndex(2f)
+                                }
                             )
+                        }
 
-                            // 底栏：目录 / 搜索 / 亮度 / 设置（书签在顶栏）
+                        // 底栏：目录 / 搜索 / 亮度 / 设置（书签在顶栏），自下滑入
+                        AnimatedVisibility(
+                            visible = showChrome,
+                            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .zIndex(2f)
+                        ) {
                             ReaderBottomChrome(
                                 hasChapters = book!!.format.isEbook &&
                                     content.toc.size >= 2,
@@ -388,10 +406,7 @@ fun ReaderScreen(
                                 },
                                 onOpenBrightness = {
                                     sheetKind = SheetKind.BRIGHTNESS
-                                },
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .zIndex(2f)
+                                }
                             )
                         }
                     }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
@@ -227,7 +228,7 @@ fun BookshelfScreen(
                 )
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 160.dp),
+                    columns = shelfGridCells(),
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         end = 16.dp,
@@ -519,6 +520,17 @@ private fun EmptyBookshelf(
             TextButton(onClick = onCreateFolder) { Text("新建空文件夹") }
         }
     }
+}
+
+/**
+ * 书架网格列数：卡片宽度随屏宽相对变化（约 1/3 屏宽起步），不写死 dp。
+ * 手机约 3 列，大屏/平板 5–8 列。
+ */
+@Composable
+fun shelfGridCells(): GridCells {
+    val widthDp = LocalConfiguration.current.screenWidthDp
+    val count = (widthDp / 140).coerceIn(3, 8)
+    return GridCells.Fixed(count)
 }
 
 @OptIn(ExperimentalFoundationApi::class)

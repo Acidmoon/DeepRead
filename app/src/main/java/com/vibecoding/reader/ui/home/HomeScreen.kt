@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -38,6 +37,7 @@ import com.vibecoding.reader.di.AppContainer
 import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.ui.bookshelf.BookshelfScreen
+import com.vibecoding.reader.ui.bookshelf.shelfGridCells
 import com.vibecoding.reader.ui.bookshelf.BookshelfViewModel
 import com.vibecoding.reader.ui.bookshelf.ShelfBookCard
 import com.vibecoding.reader.ui.common.AppBottomStatusBar
@@ -168,7 +168,7 @@ private fun RecentReadingContent(
         }
     } else {
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 160.dp),
+            columns = shelfGridCells(),
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
