@@ -250,7 +250,7 @@ class BookImporter(
     }
 
     companion object {
-        const val TOC_CACHE_VERSION = 4
+        const val TOC_CACHE_VERSION = 5
 
         fun loadToc(context: Context, bookId: String): List<TocEntry> {
             val file = File(context.filesDir, "books/$bookId/toc.json")

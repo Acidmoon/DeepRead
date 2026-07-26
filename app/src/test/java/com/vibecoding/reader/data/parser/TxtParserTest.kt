@@ -87,8 +87,6 @@ class TxtParserTest {
     fun rejectsNonChapterHeadings() {
         assertNull(TxtParser.classifyHeading("序章开篇"))
         assertNull(TxtParser.classifyHeading("1. 引言"))
-        assertNull(TxtParser.classifyHeading("第一节 开始"))
-        assertNull(TxtParser.classifyHeading("第三回 风云"))
         assertNull(TxtParser.classifyHeading("这是正文里提到第一章的句子很长很长超过限制也会被长度挡下吗"))
         // 正文中夹带不算（无行首结构时整行需完整匹配）
         assertNull(TxtParser.classifyHeading("他说第一章很好看"))
@@ -98,10 +96,79 @@ class TxtParserTest {
     fun acceptsStrictHeadings() {
         assertEquals(TocKind.CHAPTER, TxtParser.classifyHeading("第一章")?.first)
         assertEquals(TocKind.CHAPTER, TxtParser.classifyHeading("第12章 远征")?.first)
+        // 回 / 节 也算候选章，最终取舍由 buildToc 多数决决定
+        assertEquals(TocKind.CHAPTER, TxtParser.classifyHeading("第三回 风云")?.first)
+        assertEquals(TocKind.CHAPTER, TxtParser.classifyHeading("第一节 开始")?.first)
         assertEquals(TocKind.CHAPTER, TxtParser.classifyHeading("Chapter 3: Fire")?.first)
         assertEquals(TocKind.VOLUME, TxtParser.classifyHeading("第一卷 序")?.first)
         assertEquals(TocKind.VOLUME, TxtParser.classifyHeading("卷2")?.first)
         assertEquals(TocKind.VOLUME, TxtParser.classifyHeading("Volume 2")?.first)
+    }
+
+    @Test
+    fun dominantMarkerWins_chapterOverHui() {
+        // 全书主要是「第X章」，偶发的「第X回」不进目录
+        val text = """
+            第一章 起
+            正文
+            第二章 承
+            正文
+            第三回 偶发提及
+            第三章 转
+        """.trimIndent()
+        val toc = TxtParser.buildToc(text)
+        assertEquals(3, toc.size)
+        assertTrue(toc.all { it.title.contains("章") })
+    }
+
+    @Test
+    fun dominantMarkerWins_huiBook() {
+        // 以「第X回」为主体的书，回就是章节
+        val text = """
+            第一卷 金陵
+            第一回 甄士隐
+            正文
+            第二回 贾夫人
+            正文
+            第二卷 扬州
+            第三回 林黛玉
+        """.trimIndent()
+        val toc = TxtParser.buildToc(text)
+        assertEquals(5, toc.size)
+        assertEquals(TocKind.VOLUME, toc[0].kind)
+        assertEquals(0, toc[0].level)
+        assertEquals(TocKind.CHAPTER, toc[1].kind)
+        assertEquals(1, toc[1].level)
+        assertTrue(toc[1].title.contains("回"))
+        assertEquals(TocKind.VOLUME, toc[3].kind)
+    }
+
+    @Test
+    fun dominantMarkerWins_jieBook() {
+        val text = """
+            第一节 概论
+            正文
+            第二节 方法
+            正文
+            第一章 偶发的章提法
+            第三节 结论
+        """.trimIndent()
+        val toc = TxtParser.buildToc(text)
+        assertEquals(3, toc.size)
+        assertTrue(toc.all { it.title.contains("节") })
+    }
+
+    @Test
+    fun volumeOnlyBookKeepsVolumesAsTopLevel() {
+        // 只有卷的书：卷作上级目录，不算章节
+        val text = """
+            第一卷 上篇
+            正文
+            第二卷 下篇
+        """.trimIndent()
+        val toc = TxtParser.buildToc(text)
+        assertEquals(2, toc.size)
+        assertTrue(toc.all { it.kind == TocKind.VOLUME && it.level == 0 })
     }
 
     @Test
