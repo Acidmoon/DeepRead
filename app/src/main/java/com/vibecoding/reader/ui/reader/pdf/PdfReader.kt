@@ -236,6 +236,8 @@ private fun PdfHorizontalReader(
     HorizontalPager(
         state = pagerState,
         userScrollEnabled = allowSlide,
+        // 日漫从右往左：页序反转，右滑进入下一页；页码与进度仍按真实页索引上报
+        reverseLayout = settings.pdfRightToLeft,
         modifier = modifier
             .fillMaxSize()
             .background(background)

@@ -218,7 +218,9 @@ data class ReadingSettings(
     val autoScrollLinesPerSec: Float = 1.2f,
     // —— PDF（与电子书设置分离）——
     val pdfPageTurnMode: PageTurnMode = PageTurnMode.BOTH,
-    val pdfBackgroundColor: Long = 0xFF000000
+    val pdfBackgroundColor: Long = 0xFF000000,
+    /** PDF 水平翻页从右往左（日漫阅读顺序），仅对左右翻页模式生效 */
+    val pdfRightToLeft: Boolean = false
 )
 
 /**

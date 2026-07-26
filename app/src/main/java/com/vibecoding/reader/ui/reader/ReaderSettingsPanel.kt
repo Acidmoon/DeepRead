@@ -113,6 +113,31 @@ private fun PdfSettingsPanel(
         )
 
         Spacer(Modifier.height(16.dp))
+        Text("阅读方向", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            PdfPageModeChip(
+                selected = !settings.pdfRightToLeft,
+                label = "从左往右",
+                onClick = { onChange(settings.copy(pdfRightToLeft = false)) }
+            )
+            PdfPageModeChip(
+                selected = settings.pdfRightToLeft,
+                label = "从右往左（日漫）",
+                onClick = { onChange(settings.copy(pdfRightToLeft = true)) }
+            )
+        }
+        Text(
+            "仅对左右翻页生效：从右往左时右滑进入下一页",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.padding(top = 6.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
         AutoPageTurnSettingsSection(settings = settings, onChange = onChange)
 
         Spacer(Modifier.height(20.dp))

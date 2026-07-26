@@ -151,7 +151,8 @@ data class ReadingSettingsEntity(
     val screenDim: Float = 0f,
     val autoPageTurnEnabled: Boolean = false,
     val autoPageIntervalSec: Float = 8f,
-    val autoScrollLinesPerSec: Float = 1.2f
+    val autoScrollLinesPerSec: Float = 1.2f,
+    val pdfRightToLeft: Boolean = false
 ) {
     fun toDomain(): ReadingSettings = ReadingSettings(
         backgroundColor = backgroundColor,
@@ -168,7 +169,8 @@ data class ReadingSettingsEntity(
         autoScrollLinesPerSec = autoScrollLinesPerSec,
         pdfPageTurnMode = runCatching { PageTurnMode.valueOf(pdfPageTurnMode) }
             .getOrDefault(PageTurnMode.BOTH),
-        pdfBackgroundColor = pdfBackgroundColor
+        pdfBackgroundColor = pdfBackgroundColor,
+        pdfRightToLeft = pdfRightToLeft
     )
 
     companion object {
@@ -186,7 +188,8 @@ data class ReadingSettingsEntity(
             screenDim = settings.screenDim,
             autoPageTurnEnabled = settings.autoPageTurnEnabled,
             autoPageIntervalSec = settings.autoPageIntervalSec,
-            autoScrollLinesPerSec = settings.autoScrollLinesPerSec
+            autoScrollLinesPerSec = settings.autoScrollLinesPerSec,
+            pdfRightToLeft = settings.pdfRightToLeft
         )
 
         fun default() = fromDomain(ReadingSettings())
