@@ -284,7 +284,9 @@ fun ReaderScreen(
                                         onPageCount = { pdfPageCount = it },
                                         modifier = Modifier.fillMaxSize(),
                                         bottomSafeInset = bottomSafeInset,
-                                        pauseAutoTurn = pauseAutoTurn
+                                        pauseAutoTurn = pauseAutoTurn,
+                                        storedPassword = book!!.pdfPassword,
+                                        onPasswordVerified = viewModel::savePdfPassword
                                     )
                                 }
                             }

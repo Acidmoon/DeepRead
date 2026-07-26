@@ -78,7 +78,9 @@ data class Book(
     val remoteId: String? = null,
     val updatedAt: Long = addedAt,
     /** 所属书架文件夹；null 表示在根目录 */
-    val folderId: String? = null
+    val folderId: String? = null,
+    /** 加密 PDF 的打开密码（本地明文保存，解锁一次后免输入） */
+    val pdfPassword: String? = null
 )
 
 /**

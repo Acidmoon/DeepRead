@@ -53,7 +53,8 @@ data class BookEntity(
     val progressPercent: Float,
     val remoteId: String?,
     val updatedAt: Long,
-    val folderId: String? = null
+    val folderId: String? = null,
+    val pdfPassword: String? = null
 ) {
     fun toDomain(): Book = Book(
         id = id,
@@ -69,7 +70,8 @@ data class BookEntity(
         progressPercent = progressPercent,
         remoteId = remoteId,
         updatedAt = updatedAt,
-        folderId = folderId
+        folderId = folderId,
+        pdfPassword = pdfPassword
     )
 
     companion object {
@@ -87,7 +89,8 @@ data class BookEntity(
             progressPercent = book.progressPercent,
             remoteId = book.remoteId,
             updatedAt = book.updatedAt,
-            folderId = book.folderId
+            folderId = book.folderId,
+            pdfPassword = book.pdfPassword
         )
     }
 }

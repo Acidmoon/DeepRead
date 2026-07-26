@@ -211,6 +211,21 @@ class ReaderViewModel(
         }
     }
 
+    /** 加密 PDF 解锁成功后把密码记在本地，下次免输入 */
+    fun savePdfPassword(password: String) {
+        viewModelScope.launch {
+            val b = bookRepository.getBook(bookId) ?: return@launch
+            if (b.pdfPassword != password) {
+                bookRepository.upsert(
+                    b.copy(
+                        pdfPassword = password,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
+    }
+
     fun updateSettings(settings: ReadingSettings) {
         viewModelScope.launch {
             settingsRepository.save(settings)
