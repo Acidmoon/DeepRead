@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,11 +21,34 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // 若根目录或本模块存在 gitignored 的 key.properties，则配置正式 release 签名。
+        // 未提供密钥时不创建该配置，也不生成/替换任何密钥。
+        val keyPropsFile = listOf(
+            rootProject.file("key.properties"),
+            file("key.properties")
+        ).firstOrNull { it.exists() }
+        if (keyPropsFile != null) {
+            val props = Properties()
+            FileInputStream(keyPropsFile).use { props.load(it) }
+            create("release") {
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
-            // 尚无独立 release 密钥时，用 debug 签名便于本机安装；上架前再换正式签名
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            // 没有正式密钥时继续用 debug 签名，便于本机安装；这不是正式发布签名。
+            signingConfig = if (signingConfigs.findByName("release") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
