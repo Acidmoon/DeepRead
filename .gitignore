@@ -17,3 +17,8 @@ bin/
 gen/
 out/
 .kotlin/
+
+# Release signing (optional, never commit secrets)
+key.properties
+*.jks
+*.keystore

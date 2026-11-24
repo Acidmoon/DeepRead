@@ -16,6 +16,8 @@ import java.nio.charset.Charset
  */
 object TxtParser {
 
+    private const val CHARSET_PROBE_BYTES = 256L * 1024
+
     private val cnNum = "[零〇一二三四五六七八九十百千万两0-9０-９]+"
 
     /** 中文章节类标题：第X<单位> [可选标题] */
@@ -61,9 +63,15 @@ object TxtParser {
     )
 
     fun readText(file: File): String {
-        val bytes = file.readBytes()
-        val charset = detectCharset(bytes)
-        return String(bytes, charset)
+        // 只用文件头部探测编码，避免整本 byte[] 与 String 同时驻留
+        val prefixLen = minOf(file.length(), CHARSET_PROBE_BYTES).toInt().coerceAtLeast(0)
+        val prefix = file.inputStream().use { input ->
+            val buf = ByteArray(prefixLen)
+            val n = input.read(buf)
+            if (n <= 0) ByteArray(0) else if (n == buf.size) buf else buf.copyOf(n)
+        }
+        val charset = detectCharset(prefix)
+        return file.inputStream().buffered().reader(charset).use { it.readText() }
             .replace("\r\n", "\n")
             .replace('\r', '\n')
     }

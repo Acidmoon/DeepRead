@@ -73,6 +73,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.Bookmark
@@ -111,6 +114,9 @@ fun ReaderScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val bookmarks by viewModel.bookmarks.collectAsStateWithLifecycle()
     val jumpPosition by viewModel.jumpPosition.collectAsStateWithLifecycle()
+    val pdfPageTexts by viewModel.pdfPageTexts.collectAsStateWithLifecycle()
+    val pdfIndexMessage by viewModel.pdfIndexMessage.collectAsStateWithLifecycle()
+    val pdfUnlockPassword by viewModel.pdfUnlockPassword.collectAsStateWithLifecycle()
 
     var showChrome by remember { mutableStateOf(false) }
     var sheetKind by remember { mutableStateOf<SheetKind?>(null) }
@@ -127,8 +133,18 @@ fun ReaderScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                if (currentPosition.isNotBlank()) {
+                    viewModel.saveProgressNow(currentPosition, currentProgress)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             if (currentPosition.isNotBlank()) {
                 viewModel.saveProgressNow(currentPosition, currentProgress)
             }
@@ -304,7 +320,7 @@ fun ReaderScreen(
                                         modifier = Modifier.fillMaxSize(),
                                         bottomSafeInset = bottomSafeInset,
                                         pauseAutoTurn = pauseAutoTurn,
-                                        storedPassword = book!!.pdfPassword,
+                                        storedPassword = pdfUnlockPassword,
                                         onPasswordVerified = viewModel::savePdfPassword
                                     )
                                 }
@@ -414,7 +430,7 @@ fun ReaderScreen(
                                 onOpenSettings = {
                                     sheetKind = SheetKind.SETTINGS
                                 },
-                                showSearch = book!!.format.isEbook,
+                                showSearch = book!!.format.isEbook || book!!.format == BookFormat.PDF,
                                 onOpenSearch = {
                                     sheetKind = SheetKind.SEARCH
                                 },
@@ -466,7 +482,14 @@ fun ReaderScreen(
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ) {
                 SearchSheet(
-                    text = content.text,
+                    indexMessage = if (book?.format == BookFormat.PDF) {
+                        when {
+                            pdfIndexMessage != null -> pdfIndexMessage
+                            pdfPageTexts == null -> "正在准备文字索引…"
+                            else -> null
+                        }
+                    } else null,
+                    onSearch = { query -> viewModel.searchBook(query) },
                     onHit = { hit ->
                         viewModel.jumpTo(hit.position)
                         sheetKind = null
@@ -764,8 +787,9 @@ private fun BrightnessSheet(
 
 @Composable
 private fun SearchSheet(
-    text: String,
-    onHit: (TextSearch.Hit) -> Unit
+    onSearch: (String) -> List<TextSearch.Hit>,
+    onHit: (TextSearch.Hit) -> Unit,
+    indexMessage: String? = null
 ) {
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<TextSearch.Hit>>(emptyList()) }
@@ -779,6 +803,14 @@ private fun SearchSheet(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Text("全文搜索", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        if (!indexMessage.isNullOrBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                indexMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+            )
+        }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = query,
@@ -792,7 +824,7 @@ private fun SearchSheet(
                         scope.launch {
                             searching = true
                             hits = withContext(Dispatchers.Default) {
-                                TextSearch.search(text, query)
+                                onSearch(query)
                             }
                             searching = false
                         }
@@ -808,7 +840,7 @@ private fun SearchSheet(
                 scope.launch {
                     searching = true
                     hits = withContext(Dispatchers.Default) {
-                        TextSearch.search(text, query)
+                        onSearch(query)
                     }
                     searching = false
                 }

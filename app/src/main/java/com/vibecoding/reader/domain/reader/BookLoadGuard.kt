@@ -2,6 +2,7 @@ package com.vibecoding.reader.domain.reader
 
 import com.vibecoding.reader.domain.model.BookFormat
 import java.io.File
+import java.util.Locale
 import java.io.IOException
 import java.util.concurrent.TimeoutException
 
@@ -65,9 +66,9 @@ object BookLoadGuard {
         if (bytes < 0) return "未知大小"
         if (bytes < 1024) return "${bytes}B"
         val kb = bytes / 1024.0
-        if (kb < 1024) return String.format("%.1fKB", kb)
+        if (kb < 1024) return String.format(Locale.US, "%.1fKB", kb)
         val mb = kb / 1024.0
-        return String.format("%.1fMB", mb)
+        return String.format(Locale.US, "%.1fMB", mb)
     }
 
     /** 打开前预检：返回错误文案；null 表示可继续。PDF 按页流式渲染，适用独立上限 */

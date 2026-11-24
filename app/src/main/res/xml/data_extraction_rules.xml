@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 31+（android:dataExtractionRules）。
+  显式 include，避免空标签在不同版本上语义不清。
+  书架数据库和 filesDir 中的书籍副本可备份 / 设备转移；
+  no_backup 仍由系统排除。
+  与 fullBackupContent 一样，是否纳入数据库由 ReaderBackupAgent 在打包前按明文是否还在决定。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="." />
+        <include domain="database" path="." />
+        <include domain="sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="." />
+        <include domain="database" path="." />
+        <include domain="sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>

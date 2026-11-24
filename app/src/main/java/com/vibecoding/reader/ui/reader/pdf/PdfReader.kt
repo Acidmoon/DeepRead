@@ -64,6 +64,10 @@ import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.reader.AutoPageTurn
 import com.vibecoding.reader.domain.reader.ReadingGestures
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import androidx.compose.runtime.collectAsState
 import com.vibecoding.reader.ui.common.ReadingLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -192,8 +196,11 @@ fun PdfReader(
                 }
             }
             settings.pdfPageTurnMode == PageTurnMode.VERTICAL -> {
+                val store = remember(filePath) { PdfBitmapStore() }
+                DisposableEffect(store) { onDispose { store.close() } }
                 PdfVerticalReader(
                     rendererHolder = pdfEngine,
+                    bitmapStore = store,
                     pageCount = pageCount,
                     settings = settings,
                     background = bg,
@@ -209,8 +216,11 @@ fun PdfReader(
                 )
             }
             else -> {
+                val store = remember(filePath) { PdfBitmapStore() }
+                DisposableEffect(store) { onDispose { store.close() } }
                 PdfHorizontalReader(
                     rendererHolder = pdfEngine,
+                    bitmapStore = store,
                     pageCount = pageCount,
                     settings = settings,
                     background = bg,
@@ -314,7 +324,9 @@ private fun openPdfEngine(context: Context, filePath: String, password: String?)
 /** 统一渲染引擎抽象：系统 PdfRenderer 与 PdfBox 回退共用 */
 private interface PdfEngine {
     val pageCount: Int
+    val aspectEpoch: StateFlow<Int>
     fun aspectOf(index: Int): Float
+    suspend fun ensureAspects(indices: Iterable<Int>)
     suspend fun renderPageFit(index: Int, targetW: Int, targetH: Int): Bitmap?
     suspend fun renderPageFillWidth(index: Int, targetW: Int): Bitmap?
     fun close()
@@ -324,6 +336,7 @@ private interface PdfEngine {
 @Composable
 private fun PdfHorizontalReader(
     rendererHolder: PdfEngine,
+    bitmapStore: PdfBitmapStore,
     pageCount: Int,
     settings: ReadingSettings,
     background: Color,
@@ -348,6 +361,13 @@ private fun PdfHorizontalReader(
     val allowSlide = ReadingGestures.allowsSlidePageTurn(settings.pdfPageTurnMode)
     val autoActive = settings.autoPageTurnEnabled && !pauseAutoTurn && pageCount > 0
     val zoomState = remember { PdfZoomState() }
+    val aspectEpoch by rendererHolder.aspectEpoch.collectAsState()
+    LaunchedEffect(pagerState.currentPage, pageCount, aspectEpoch) {
+        val page = pagerState.currentPage
+        val from = (page - 1).coerceAtLeast(0)
+        val to = (page + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0))
+        rendererHolder.ensureAspects(from..to)
+    }
 
     // 翻页后回到 1 倍，避免下一页沿用上一页的放大
     LaunchedEffect(pagerState.currentPage) {
@@ -431,6 +451,7 @@ private fun PdfHorizontalReader(
             val targetH = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
             PdfPageImage(
                 rendererHolder = rendererHolder,
+                bitmapStore = bitmapStore,
                 pageIndex = page,
                 fitSize = IntSize(targetW, targetH),
                 fillWidth = false,
@@ -445,6 +466,7 @@ private fun PdfHorizontalReader(
 @Composable
 private fun PdfVerticalReader(
     rendererHolder: PdfEngine,
+    bitmapStore: PdfBitmapStore,
     pageCount: Int,
     settings: ReadingSettings,
     background: Color,
@@ -466,6 +488,16 @@ private fun PdfVerticalReader(
     )
     val pages = remember(pageCount) { (0 until pageCount).toList() }
     val zoomState = remember { PdfZoomState() }
+    val aspectEpoch by rendererHolder.aspectEpoch.collectAsState()
+    LaunchedEffect(listState, pageCount, aspectEpoch) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { first ->
+                val from = (first - 2).coerceAtLeast(0)
+                val to = (first + 8).coerceAtMost((pageCount - 1).coerceAtLeast(0))
+                rendererHolder.ensureAspects(from..to)
+            }
+    }
 
     LaunchedEffect(jumpPosition, pageCount) {
         val jump = jumpPosition ?: return@LaunchedEffect
@@ -546,6 +578,7 @@ private fun PdfVerticalReader(
                 }
                 PdfPageImage(
                     rendererHolder = rendererHolder,
+                    bitmapStore = bitmapStore,
                     pageIndex = page,
                     fitSize = IntSize(
                         viewportW,
@@ -565,29 +598,44 @@ private fun PdfVerticalReader(
 @Composable
 private fun PdfPageImage(
     rendererHolder: PdfEngine,
+    bitmapStore: PdfBitmapStore,
     pageIndex: Int,
     fitSize: IntSize,
     fillWidth: Boolean,
     contentDescription: String,
     modifier: Modifier = Modifier
 ) {
-    var bitmap by remember(pageIndex, fitSize.width, fitSize.height, fillWidth) {
-        mutableStateOf<Bitmap?>(null)
-    }
+    val key = "$pageIndex:${fitSize.width}x${fitSize.height}:$fillWidth"
+    var bitmap by remember(key) { mutableStateOf<Bitmap?>(bitmapStore.get(key)) }
 
-    LaunchedEffect(pageIndex, fitSize.width, fitSize.height, fillWidth) {
+    LaunchedEffect(key) {
         if (fitSize.width <= 0 || fitSize.height <= 0) return@LaunchedEffect
-        bitmap = withContext(Dispatchers.IO) {
+        bitmapStore.get(key)?.let { cached ->
+            if (!cached.isRecycled) {
+                bitmapStore.touch(key)
+                bitmap = cached
+                return@LaunchedEffect
+            }
+        }
+        val rendered = withContext(Dispatchers.IO) {
             if (fillWidth) {
                 rendererHolder.renderPageFillWidth(pageIndex, fitSize.width)
             } else {
                 rendererHolder.renderPageFit(pageIndex, fitSize.width, fitSize.height)
             }
         }
+        if (rendered != null) {
+            bitmapStore.put(key, rendered)
+            bitmap = rendered
+        }
+    }
+
+    DisposableEffect(key) {
+        onDispose { bitmapStore.unpin(key) }
     }
 
     val bmp = bitmap
-    if (bmp != null) {
+    if (bmp != null && !bmp.isRecycled) {
         Image(
             bitmap = bmp.asImageBitmap(),
             contentDescription = contentDescription,
@@ -612,16 +660,13 @@ private class AndroidPdfEngine(descriptor: ParcelFileDescriptor) : PdfEngine {
     private var renderer: PdfRenderer? = null
     private var aspects: FloatArray = floatArrayOf()
     private val mutex = Mutex()
+    private val _aspectEpoch = MutableStateFlow(0)
+    override val aspectEpoch: StateFlow<Int> = _aspectEpoch.asStateFlow()
 
     init {
         val r = PdfRenderer(descriptor)
         renderer = r
-        aspects = FloatArray(r.pageCount) { i ->
-            r.openPage(i).use { page ->
-                if (page.height <= 0) 1f
-                else page.width.toFloat() / page.height.toFloat()
-            }
-        }
+        aspects = FloatArray(r.pageCount) { Float.NaN }
     }
 
     override val pageCount: Int get() = renderer?.pageCount ?: 0
@@ -635,8 +680,25 @@ private class AndroidPdfEngine(descriptor: ParcelFileDescriptor) : PdfEngine {
     }
 
     override fun aspectOf(index: Int): Float {
-        if (index in aspects.indices) return aspects[index]
+        val value = aspects.getOrNull(index)
+        if (value != null && !value.isNaN()) return value
         return 210f / 297f
+    }
+
+    override suspend fun ensureAspects(indices: Iterable<Int>) {
+        mutex.withLock {
+            val r = renderer ?: return
+            var changed = false
+            for (i in indices) {
+                if (i !in aspects.indices || !aspects[i].isNaN()) continue
+                aspects[i] = r.openPage(i).use { page ->
+                    if (page.height <= 0) 1f
+                    else page.width.toFloat() / page.height.toFloat()
+                }
+                changed = true
+            }
+            if (changed) _aspectEpoch.value = _aspectEpoch.value + 1
+        }
     }
 
     /** 等比缩放完整落入视口（左右翻页，一页铺满屏幕可用区域）。 */
@@ -684,13 +746,9 @@ private class AndroidPdfEngine(descriptor: ParcelFileDescriptor) : PdfEngine {
 private class PdfBoxEngine(private val doc: PDDocument) : PdfEngine {
     private val renderer = PDFRenderer(doc)
     private val mutex = Mutex()
-    private val aspects: FloatArray = FloatArray(doc.numberOfPages) { i ->
-        runCatching {
-            val box = doc.getPage(i).cropBox
-            if (box == null || box.height <= 0) 1f
-            else box.width / box.height
-        }.getOrDefault(1f)
-    }
+    private val aspects = FloatArray(doc.numberOfPages) { Float.NaN }
+    private val _aspectEpoch = MutableStateFlow(0)
+    override val aspectEpoch: StateFlow<Int> = _aspectEpoch.asStateFlow()
 
     override val pageCount: Int get() = doc.numberOfPages
 
@@ -699,8 +757,25 @@ private class PdfBoxEngine(private val doc: PDDocument) : PdfEngine {
     }
 
     override fun aspectOf(index: Int): Float {
-        if (index in aspects.indices) return aspects[index]
+        val value = aspects.getOrNull(index)
+        if (value != null && !value.isNaN()) return value
         return 210f / 297f
+    }
+
+    override suspend fun ensureAspects(indices: Iterable<Int>) {
+        mutex.withLock {
+            var changed = false
+            for (i in indices) {
+                if (i !in aspects.indices || !aspects[i].isNaN()) continue
+                aspects[i] = runCatching {
+                    val box = doc.getPage(i).cropBox
+                    if (box == null || box.height <= 0) 1f
+                    else box.width / box.height
+                }.getOrDefault(1f)
+                changed = true
+            }
+            if (changed) _aspectEpoch.value = _aspectEpoch.value + 1
+        }
     }
 
     override suspend fun renderPageFit(index: Int, targetW: Int, targetH: Int): Bitmap? =

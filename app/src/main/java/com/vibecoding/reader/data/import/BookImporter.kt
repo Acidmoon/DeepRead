@@ -6,6 +6,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import com.vibecoding.reader.data.parser.EbookLoader
+import com.vibecoding.reader.data.parser.EpubParser
+import com.vibecoding.reader.data.parser.ImagePathResolver
+import com.vibecoding.reader.data.parser.SafeLocalPath
+import com.vibecoding.reader.data.secure.PdfPasswordAccess
 import com.vibecoding.reader.data.parser.PdfOutlineParser
 import com.vibecoding.reader.data.parser.TxtParser
 import com.vibecoding.reader.data.repo.BookRepository
@@ -33,19 +37,30 @@ class BookImporter(
     ): ImportResult = withContext(Dispatchers.IO) {
         val imported = mutableListOf<Book>()
         val errors = mutableListOf<String>()
+        var reusedCount = 0
         for (uri in uris) {
             runCatching { importOne(uri, folderId) }
-                .onSuccess { imported += it }
+                .onSuccess { outcome ->
+                    imported += outcome.book
+                    if (outcome.reused) reusedCount++
+                }
                 .onFailure { errors += (it.message ?: "导入失败") }
         }
-        ImportResult(imported, errors)
+        ImportResult(imported, errors, reusedCount)
+    }
+
+    /**
+     * 从其他应用 ACTION_VIEW 打开：已在书架则复用，否则导入到根目录。
+     */
+    suspend fun importOrReuse(uri: Uri): ImportOutcome = withContext(Dispatchers.IO) {
+        importOne(uri, folderId = null)
     }
 
     /**
      * 从系统已有目录导入：
      * - 若 [existingFolderId] 为空：在书架新建同名文件夹，目录内支持的文件全部放入
      * - 若已在某文件夹内：文件导入到当前文件夹（不再新建）
-     * 递归扫描子目录中的支持格式。
+     * 递归扫描子目录中的支持格式。同名但位于不同子目录的文件都会保留。
      */
     suspend fun importFromTree(
         treeUri: Uri,
@@ -85,18 +100,22 @@ class BookImporter(
 
         val imported = mutableListOf<Book>()
         val errors = mutableListOf<String>()
+        var reusedCount = 0
         for (doc in files) {
             val uri = doc.uri
             val name = doc.name ?: "未命名"
             runCatching { importOne(uri, targetFolderId, displayNameOverride = name) }
-                .onSuccess { imported += it }
+                .onSuccess { outcome ->
+                    imported += outcome.book
+                    if (outcome.reused) reusedCount++
+                }
                 .onFailure { errors += "$name: ${it.message ?: "失败"}" }
         }
         targetFolderId.let { id -> folderRepository?.touchFolder(id) }
 
         TreeImportResult(
             folder = createdFolder,
-            result = ImportResult(imported, errors)
+            result = ImportResult(imported, errors, reusedCount)
         )
     }
 
@@ -117,21 +136,48 @@ class BookImporter(
             }
         }
         walk(root)
-        // 同名文件去重（保留先扫到的）
-        return out.distinctBy { it.name?.lowercase() }
+        // 不再按纯文件名去重，避免不同子目录里的同名文件被悄悄丢掉
+        return out
     }
 
     private suspend fun importOne(
         uri: Uri,
         folderId: String? = null,
         displayNameOverride: String? = null
-    ): Book {
-        val name = displayNameOverride
-            ?: queryDisplayName(uri)
-            ?: "未命名文档"
-        val format = BookFormat.fromFileName(name)
-            ?: BookFormat.fromMime(context.contentResolver.getType(uri))
-            ?: error("不支持的格式：$name（支持 TXT / MD / EPUB / PDF / DOCX）")
+    ): ImportOutcome {
+        val mime = try {
+            context.contentResolver.getType(uri)
+        } catch (e: SecurityException) {
+            error(ImportPrecheck.noReadPermissionMessage(uri.toString()))
+        }
+        val rawName = displayNameOverride ?: try {
+            queryDisplayName(uri)
+        } catch (e: SecurityException) {
+            error(ImportPrecheck.noReadPermissionMessage(uri.toString()))
+        }
+        val name = ImportPrecheck.effectiveFileName(rawName, mime)
+        if (ImportPrecheck.isLegacyMsWord(name, mime)) {
+            error(ImportPrecheck.legacyMsWordMessage(name))
+        }
+        val format = ImportPrecheck.resolveFormat(name, mime)
+            ?: error(ImportPrecheck.unsupportedFormatMessage(name))
+
+        val sourceUri = uri.toString()
+        val existing = bookRepository.getBySourceUri(sourceUri)
+        if (existing != null) {
+            val local = File(existing.localPath)
+            if (local.exists() && local.isFile && local.length() > 0L) {
+                return ImportOutcome(existing, reused = true)
+            }
+        }
+
+        val sourceSize = querySize(uri)
+        ImportPrecheck.sizeError(sourceSize, format)?.let { error(it) }
+        val usable = context.filesDir.usableSpace
+        ImportPrecheck.spaceError(
+            neededBytes = if (sourceSize > 0L) sourceSize else 0L,
+            usableSpace = usable
+        )?.let { error(it) }
 
         val bookId = UUID.randomUUID().toString()
         val dir = File(context.filesDir, "books/$bookId").apply { mkdirs() }
@@ -144,63 +190,93 @@ class BookImporter(
         }
         val dest = File(dir, "original.$ext")
 
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            dest.outputStream().use { output -> input.copyTo(output) }
-        } ?: error("无法读取文件：$name")
-
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        }
-
-        // 书名优先用导入时的显示文件名，勿被本地副本 original.* 覆盖
-        var title = TxtParser.titleFromFileName(name).let { t ->
-            if (t.equals("original", ignoreCase = true)) "未命名文档" else t
-        }
-        var author: String? = null
-        val toc = when {
-            format.isEbook -> {
-                val doc = EbookLoader.load(format, dest, dir)
-                // 仅当解析出「有意义」的元数据标题时才覆盖（排除 original）
-                val meta = doc.title?.trim().orEmpty()
-                if (meta.isNotBlank() && !meta.equals("original", ignoreCase = true)) {
-                    title = meta
-                }
-                author = doc.author
-                doc.toc
+        try {
+            val maxBytes = ImportPrecheck.limitFor(format)
+            try {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { output ->
+                        ImportPrecheck.copyCapped(input, output, maxBytes)
+                    }
+                } ?: error("无法读取文件：$name")
+            } catch (e: SecurityException) {
+                error(ImportPrecheck.noReadPermissionMessage(name))
             }
-            format == BookFormat.PDF -> extractPdfToc(dest)
-            else -> emptyList()
+
+            if (dest.length() <= 0L) error("文件为空或无法读取")
+
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+
+            if (format == BookFormat.MD) {
+                copyMarkdownSidecarImages(uri, dest, dir)
+            }
+
+            // 书名优先用导入时的显示文件名，勿被本地副本 original.* 覆盖
+            var title = TxtParser.titleFromFileName(name).let { t ->
+                if (t.equals("original", ignoreCase = true)) "未命名文档" else t
+            }
+            var author: String? = null
+            var preParsedEpub: EpubParser.EpubParseResult? = null
+            val toc = when {
+                format == BookFormat.EPUB -> {
+                    val parsed = EpubParser.parse(dest, mediaDir = File(dir, "media"))
+                    preParsedEpub = parsed
+                    val meta = parsed.document.title?.trim().orEmpty()
+                    if (meta.isNotBlank() && !meta.equals("original", ignoreCase = true)) {
+                        title = meta
+                    }
+                    author = parsed.document.author
+                    parsed.document.toc
+                }
+                format.isEbook -> {
+                    val doc = EbookLoader.load(format, dest, dir)
+                    // 仅当解析出「有意义」的元数据标题时才覆盖（排除 original）
+                    val meta = doc.title?.trim().orEmpty()
+                    if (meta.isNotBlank() && !meta.equals("original", ignoreCase = true)) {
+                        title = meta
+                    }
+                    author = doc.author
+                    doc.toc
+                }
+                format == BookFormat.PDF -> extractPdfToc(dest)
+                else -> emptyList()
+            }
+            saveToc(dir, toc)
+
+            val cover = CoverGenerator.ensureCover(
+                format = format,
+                localFile = dest,
+                bookDir = dir,
+                title = title,
+                preParsedEpub = preParsedEpub
+            )
+
+            val now = System.currentTimeMillis()
+            val book = Book(
+                id = bookId,
+                title = title,
+                author = author,
+                format = format,
+                sourceUri = sourceUri,
+                localPath = dest.absolutePath,
+                coverPath = cover.coverPath,
+                addedAt = now,
+                lastOpenedAt = 0L,
+                lastPosition = "",
+                progressPercent = 0f,
+                updatedAt = now,
+                folderId = folderId
+            )
+            bookRepository.upsert(book)
+            return ImportOutcome(book, reused = false)
+        } catch (e: Throwable) {
+            runCatching { dir.deleteRecursively() }
+            throw e
         }
-        saveToc(dir, toc)
-
-        val cover = CoverGenerator.ensureCover(
-            format = format,
-            localFile = dest,
-            bookDir = dir,
-            title = title
-        )
-
-        val now = System.currentTimeMillis()
-        val book = Book(
-            id = bookId,
-            title = title,
-            author = author,
-            format = format,
-            sourceUri = uri.toString(),
-            localPath = dest.absolutePath,
-            coverPath = cover.coverPath,
-            addedAt = now,
-            lastOpenedAt = 0L,
-            lastPosition = "",
-            progressPercent = 0f,
-            updatedAt = now,
-            folderId = folderId
-        )
-        bookRepository.upsert(book)
-        return book
     }
 
     suspend fun ensureBookCover(book: Book): Book = withContext(Dispatchers.IO) {
@@ -215,7 +291,8 @@ class BookImporter(
             format = book.format,
             localFile = local,
             bookDir = dir,
-            title = book.title
+            title = book.title,
+            password = PdfPasswordAccess.resolve(context, book, bookRepository)
         )
         if (result.coverPath.isNullOrBlank()) return@withContext book
         val updated = book.copy(
@@ -224,6 +301,70 @@ class BookImporter(
         )
         bookRepository.upsert(updated)
         updated
+    }
+
+
+    private fun copyMarkdownSidecarImages(uri: Uri, destMd: File, bookDir: File) {
+        val raw = TxtParser.readText(destMd)
+        val sourceBase = sourceFileBase(uri)
+        val (rewritten, copied) = if (sourceBase != null && sourceBase.isDirectory) {
+            MarkdownSidecarImages.copyAndRewrite(raw, sourceBase, bookDir)
+        } else {
+            copyMarkdownImagesFromDocument(uri, raw, bookDir)
+        }
+        if (copied > 0 && rewritten != raw) {
+            destMd.writeText(rewritten)
+        }
+    }
+
+    private fun sourceFileBase(uri: Uri): File? {
+        if (!uri.scheme.equals("file", ignoreCase = true)) return null
+        val path = uri.path ?: return null
+        return File(path).parentFile
+    }
+
+    private fun copyMarkdownImagesFromDocument(
+        uri: Uri,
+        raw: String,
+        bookDir: File
+    ): Pair<String, Int> {
+        val doc = DocumentFile.fromSingleUri(context, uri) ?: return raw to 0
+        // 单文件 content URI 通常没有可枚举的父目录，此时无法复制相对图片（不是实现遗漏）
+        val parent = doc.parentFile ?: return raw to 0
+        val media = File(bookDir, "media").apply { mkdirs() }
+        val mapped = LinkedHashMap<String, String>()
+        var copied = 0
+        for (src in MarkdownSidecarImages.findLocalSources(raw)) {
+            if (ImagePathResolver.isRemote(src)) continue
+            if (MarkdownSidecarImages.isUnsafeRelative(src)) continue
+            val child = resolveDocumentChild(parent, src) ?: continue
+            val destName = SafeLocalPath.safeFileName(child.name ?: "image", mapped.size)
+            val dest = File(media, destName)
+            val ok = runCatching {
+                context.contentResolver.openInputStream(child.uri)?.use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                } ?: false
+                dest.exists() && dest.length() > 0L
+            }.getOrDefault(false)
+            if (ok) {
+                mapped[src] = "media/$destName"
+                copied++
+            } else {
+                runCatching { dest.delete() }
+            }
+        }
+        return MarkdownSidecarImages.applyRewrite(raw, mapped) to copied
+    }
+
+    private fun resolveDocumentChild(start: DocumentFile, rel: String): DocumentFile? {
+        val parts = ImagePathResolver.decode(rel).replace('\\', '/').split('/')
+            .filter { it.isNotEmpty() && it != "." }
+        if (parts.isEmpty() || parts.any { it == ".." }) return null
+        var cur = start
+        for (part in parts) {
+            cur = cur.listFiles().firstOrNull { it.name == part } ?: return null
+        }
+        return cur.takeIf { it.isFile }
     }
 
     private fun extractPdfToc(file: File): List<TocEntry> {
@@ -247,6 +388,16 @@ class BookImporter(
             }
         }
         return uri.lastPathSegment
+    }
+
+    private fun querySize(uri: Uri): Long {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index >= 0 && cursor.moveToFirst() && !cursor.isNull(index)) {
+                return cursor.getLong(index)
+            }
+        }
+        return -1L
     }
 
     companion object {
@@ -310,9 +461,15 @@ class BookImporter(
     }
 }
 
+data class ImportOutcome(
+    val book: Book,
+    val reused: Boolean
+)
+
 data class ImportResult(
     val books: List<Book>,
-    val errors: List<String>
+    val errors: List<String>,
+    val reusedCount: Int = 0
 )
 
 data class TreeImportResult(

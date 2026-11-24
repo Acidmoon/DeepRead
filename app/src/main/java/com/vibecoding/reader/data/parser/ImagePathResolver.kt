@@ -17,23 +17,11 @@ object ImagePathResolver {
         }.getOrDefault(src.trim().substringBefore('#'))
 
     /**
-     * 将相对路径解析为绝对文件；不存在则返回 null。
+     * 将相对路径解析为绝对文件；不存在或越出 [baseDir] 则返回 null。
      */
     fun resolveLocal(baseDir: File?, src: String): String? {
         if (src.isBlank() || isRemote(src)) return null
-        val decoded = decode(src).replace('\\', '/')
-        if (decoded.startsWith("file:")) {
-            val f = File(decoded.removePrefix("file://").removePrefix("file:"))
-            return f.takeIf { it.exists() }?.absolutePath
-        }
         val base = baseDir ?: return null
-        // 去掉开头 ./
-        val rel = decoded.removePrefix("./")
-        val candidates = listOf(
-            File(base, rel),
-            File(base, rel.substringAfterLast('/')),
-            File(base.parentFile ?: base, rel)
-        )
-        return candidates.firstOrNull { it.exists() && it.isFile }?.absolutePath
+        return SafeLocalPath.resolveUnder(base, src)?.absolutePath
     }
 }

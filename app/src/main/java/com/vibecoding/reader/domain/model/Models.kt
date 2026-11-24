@@ -41,13 +41,17 @@ enum class BookFormat {
             }
         }
 
-        fun fromMime(mime: String?): BookFormat? = when (mime) {
-            "text/plain" -> TXT
-            "text/markdown", "text/x-markdown" -> MD
-            "application/epub+zip" -> EPUB
-            "application/pdf" -> PDF
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> DOCX
-            else -> null
+        fun fromMime(mime: String?): BookFormat? {
+            val key = mime?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+            if (key.isEmpty()) return null
+            return when (key) {
+                "text/plain" -> TXT
+                "text/markdown", "text/x-markdown" -> MD
+                "application/epub+zip" -> EPUB
+                "application/pdf" -> PDF
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> DOCX
+                else -> null
+            }
         }
     }
 }

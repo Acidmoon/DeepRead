@@ -5,9 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.vibecoding.reader.data.import.BookImporter
+import com.vibecoding.reader.data.import.ImportResult
 import com.vibecoding.reader.data.repo.BookRepository
 import com.vibecoding.reader.data.repo.FolderRepository
 import com.vibecoding.reader.data.repo.ShelfRepository
+import com.vibecoding.reader.domain.bookshelf.ShelfSearch
 import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.ShelfItem
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -45,8 +48,11 @@ class BookshelfViewModel(
     )
     val ui: StateFlow<BookshelfUiState> = _ui.asStateFlow()
 
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val shelfItems: StateFlow<List<ShelfItem>> = _folderId
+    private val rawShelfItems: StateFlow<List<ShelfItem>> = _folderId
         .flatMapLatest { folderId ->
             if (folderId == null) {
                 shelfRepository.observeRootShelf()
@@ -57,6 +63,27 @@ class BookshelfViewModel(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val shelfItems: StateFlow<List<ShelfItem>> = combine(
+        rawShelfItems,
+        _searchQuery,
+        bookRepository.observeBooks()
+    ) { items, query, allBooks ->
+        val extra = if (_folderId.value == null && query.isNotBlank()) {
+            allBooks.filter { it.folderId != null }
+        } else {
+            emptyList()
+        }
+        ShelfSearch.filter(items, query, extra)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val isShelfEmpty: StateFlow<Boolean> = rawShelfItems
+        .map { it.isEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
 
     private val coverEnsuredIds = Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -74,7 +101,7 @@ class BookshelfViewModel(
         }
 
         viewModelScope.launch {
-            shelfItems.collect { items ->
+            rawShelfItems.collect { items ->
                 items.filterIsInstance<ShelfItem.BookItem>().forEach { item ->
                     val book = item.book
                     if (coverEnsuredIds.add(book.id)) {
@@ -98,7 +125,7 @@ class BookshelfViewModel(
             _ui.update {
                 it.copy(
                     isImporting = false,
-                    message = formatImportMessage(result.books.size, result.errors, folderId != null)
+                    message = formatImportMessage(result, folderId != null)
                 )
             }
         }
@@ -122,9 +149,14 @@ class BookshelfViewModel(
                 val folderHint = treeResult.folder?.let { "到「${it.name}」" }
                     ?: if (_folderId.value != null) "到当前文件夹" else ""
                 val msg = buildString {
-                    if (treeResult.result.books.isNotEmpty()) {
-                        append("已从目录导入 ${treeResult.result.books.size} 本")
+                    val fresh = treeResult.result.books.size - treeResult.result.reusedCount
+                    if (fresh > 0) {
+                        append("已从目录导入 ${fresh} 本")
                         append(folderHint)
+                    }
+                    if (treeResult.result.reusedCount > 0) {
+                        if (isNotEmpty()) append("，")
+                        append("${treeResult.result.reusedCount} 本已在书架中，未重复导入")
                     }
                     if (treeResult.result.errors.isNotEmpty()) {
                         if (isNotEmpty()) append("；")
@@ -148,18 +180,22 @@ class BookshelfViewModel(
     }
 
     private fun formatImportMessage(
-        count: Int,
-        errors: List<String>,
+        result: ImportResult,
         intoFolder: Boolean
     ): String? = buildString {
-        if (count > 0) {
-            append("已导入 $count 本")
+        val fresh = result.books.size - result.reusedCount
+        if (fresh > 0) {
+            append("已导入 $fresh 本")
             if (intoFolder) append("到当前文件夹")
         }
-        if (errors.isNotEmpty()) {
+        if (result.reusedCount > 0) {
+            if (isNotEmpty()) append("，")
+            append("${result.reusedCount} 本已在书架中，未重复导入")
+        }
+        if (result.errors.isNotEmpty()) {
             if (isNotEmpty()) append("；")
-            append(errors.first())
-            if (errors.size > 1) append(" 等${errors.size}个错误")
+            append(result.errors.first())
+            if (result.errors.size > 1) append(" 等${result.errors.size}个错误")
         }
     }.ifBlank { null }
 

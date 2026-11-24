@@ -23,10 +23,16 @@ object PdfOutlineParser {
         }
     }
 
-    fun parseOutline(file: File, pageCount: Int): List<TocEntry> {
+    fun parseOutline(file: File, pageCount: Int, password: String? = null): List<TocEntry> {
         return runCatching {
             // 大文件用磁盘暂存而非内存
-            PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { doc ->
+            val memory = MemoryUsageSetting.setupTempFileOnly()
+            val loaded = if (password.isNullOrEmpty()) {
+                PDDocument.load(file, memory)
+            } else {
+                PDDocument.load(file, password, memory)
+            }
+            loaded.use { doc ->
                 val bookmarks = doc.documentCatalog?.documentOutline ?: return emptyList()
                 val result = mutableListOf<TocEntry>()
                 var item = bookmarks.firstChild

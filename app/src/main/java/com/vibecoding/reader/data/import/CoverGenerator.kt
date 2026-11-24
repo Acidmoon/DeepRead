@@ -6,6 +6,10 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfRenderer
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.rendering.ImageType
+import com.tom_roush.pdfbox.rendering.PDFRenderer
 import android.os.ParcelFileDescriptor
 import android.text.Layout
 import android.text.StaticLayout
@@ -49,7 +53,9 @@ object CoverGenerator {
         format: BookFormat,
         localFile: File,
         bookDir: File,
-        title: String
+        title: String,
+        password: String? = null,
+        preParsedEpub: EpubParser.EpubParseResult? = null
     ): CoverResult {
         bookDir.mkdirs()
         val cover = coverFile(bookDir)
@@ -64,14 +70,15 @@ object CoverGenerator {
 
         return when (format) {
             BookFormat.PDF -> {
-                val ok = renderPdfFirstPage(localFile, cover)
+                val ok = renderPdfFirstPage(localFile, cover, password)
                 CoverResult(
                     coverPath = if (ok) cover.absolutePath else null,
                     excerpt = null
                 )
             }
             BookFormat.EPUB -> {
-                val parsed = runCatching { EpubParser.parse(localFile) }.getOrNull()
+                val parsed = preParsedEpub
+                    ?: runCatching { EpubParser.parse(localFile) }.getOrNull()
                 val fromEpub = parsed?.coverEntryName?.let { entry ->
                     EpubParser.extractCover(localFile, entry, cover)
                 } == true
@@ -139,12 +146,19 @@ object CoverGenerator {
         runCatching { file.writeText(excerpt) }
     }
 
-    private fun renderPdfFirstPage(pdfFile: File, outFile: File): Boolean {
-        return runCatching {
+    private fun renderPdfFirstPage(
+        pdfFile: File,
+        outFile: File,
+        password: String? = null
+    ): Boolean {
+        if (!password.isNullOrEmpty()) {
+            return renderPdfFirstPagePdfBox(pdfFile, outFile, password)
+        }
+        val viaSystem = runCatching {
             val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
             pfd.use { descriptor ->
                 PdfRenderer(descriptor).use { renderer ->
-                    if (renderer.pageCount <= 0) return false
+                    if (renderer.pageCount <= 0) return@runCatching false
                     renderer.openPage(0).use { page ->
                         val scale = COVER_WIDTH.toFloat() / page.width.toFloat()
                         val w = COVER_WIDTH
@@ -152,24 +166,52 @@ object CoverGenerator {
                         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                         bitmap.eraseColor(Color.WHITE)
                         page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        // 裁成书架比例画布
-                        val cover = Bitmap.createBitmap(COVER_WIDTH, COVER_HEIGHT, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(cover)
-                        canvas.drawColor(Color.WHITE)
-                        val dstH = minOf(COVER_HEIGHT, h)
-                        val src = android.graphics.Rect(0, 0, w, minOf(h, dstH))
-                        val dst = android.graphics.Rect(0, 0, COVER_WIDTH, dstH)
-                        canvas.drawBitmap(bitmap, src, dst, null)
-                        bitmap.recycle()
-                        FileOutputStream(outFile).use { fos ->
-                            cover.compress(Bitmap.CompressFormat.JPEG, 88, fos)
-                        }
-                        cover.recycle()
+                        writeCoverBitmap(bitmap, w, h, outFile)
                     }
                 }
             }
             true
         }.getOrDefault(false)
+        return viaSystem || renderPdfFirstPagePdfBox(pdfFile, outFile, null)
+    }
+
+    private fun renderPdfFirstPagePdfBox(
+        pdfFile: File,
+        outFile: File,
+        password: String?
+    ): Boolean {
+        return runCatching {
+            val memory = MemoryUsageSetting.setupTempFileOnly()
+            val doc = if (password.isNullOrEmpty()) {
+                PDDocument.load(pdfFile, memory)
+            } else {
+                PDDocument.load(pdfFile, password, memory)
+            }
+            doc.use { document ->
+                if (document.numberOfPages <= 0) return false
+                val box = document.getPage(0).cropBox ?: return false
+                val scale = COVER_WIDTH.toFloat() / box.width
+                val bitmap = PDFRenderer(document).renderImage(0, scale, ImageType.RGB)
+                    ?: return false
+                writeCoverBitmap(bitmap, bitmap.width, bitmap.height, outFile)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun writeCoverBitmap(bitmap: Bitmap, w: Int, h: Int, outFile: File) {
+        val cover = Bitmap.createBitmap(COVER_WIDTH, COVER_HEIGHT, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(cover)
+        canvas.drawColor(Color.WHITE)
+        val dstH = minOf(COVER_HEIGHT, h)
+        val src = android.graphics.Rect(0, 0, w, minOf(h, dstH))
+        val dst = android.graphics.Rect(0, 0, COVER_WIDTH, dstH)
+        canvas.drawBitmap(bitmap, src, dst, null)
+        bitmap.recycle()
+        FileOutputStream(outFile).use { fos ->
+            cover.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+        }
+        cover.recycle()
     }
 
     /**
