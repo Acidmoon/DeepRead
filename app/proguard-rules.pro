@@ -14,3 +14,6 @@
 
 # Compose / enums used in settings
 -keepclassmembers enum * { *; }
+
+# 清单引用的备份代理，避免 release 混淆后系统无法实例化
+-keep class com.vibecoding.reader.data.backup.ReaderBackupAgent { *; }

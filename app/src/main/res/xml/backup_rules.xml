@@ -4,6 +4,8 @@
   只要写出任意 <include>，就不再走“备份几乎全部文件”的默认配置，必须显式列出 domain。
   空的 <full-backup-content/> 在部分版本上会被理解成什么都不备份，因此这里写清楚。
   no_backup 目录由系统排除（PDF 密码保险箱、PDF 文字索引），不要试图备份。
+  数据库是否真正打进这一份备份，还要由 ReaderBackupAgent.onFullBackup 在迁移后决定：
+  若库中仍有明文密码列，本轮会跳过 database domain，只保留 files / sharedpref。
 -->
 <full-backup-content>
     <include domain="file" path="." />

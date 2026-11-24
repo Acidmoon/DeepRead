@@ -10,4 +10,11 @@ class PdfPasswordAccessTest {
         assertTrue(PdfPasswordAccess.canClearPlaintextColumn(true))
         assertFalse(PdfPasswordAccess.canClearPlaintextColumn(false))
     }
+
+    @Test
+    fun includeDatabaseOnlyWhenNoPlaintextRowsRemain() {
+        assertTrue(PdfPasswordAccess.includeDatabaseInBackup(0))
+        assertFalse(PdfPasswordAccess.includeDatabaseInBackup(1))
+        assertFalse(PdfPasswordAccess.includeDatabaseInBackup(3))
+    }
 }

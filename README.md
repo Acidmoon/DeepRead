@@ -57,7 +57,7 @@ app/src/main/java/com/vibecoding/reader/
 
 ## 已知限制
 
-- 加密 PDF 的打开密码经 Android Keystore 加密后存放在应用的 `no_backup` 目录，不随系统备份迁移；升级时会把库里旧明文迁入保险箱并做 WAL checkpoint / VACUUM，但恢复备份或换机后 Keystore 密钥不可用，可能需要重新输入密码
+- 加密 PDF 的打开密码经 Android Keystore 加密后存放在应用的 `no_backup` 目录，不随系统备份迁移。系统全量备份 / 设备转移会走自定义 `BackupAgent`：打包前同步迁移旧明文；若库中仍有明文密码列，这一次备份会跳过数据库（书架元数据与进度不会进入该快照），书籍文件仍可备份。WAL checkpoint / VACUUM 用于降低残留，**不是**取证级擦除。恢复备份或换机后 Keystore 密钥不可用，可能需要重新输入密码。升级后若在迁移完成前产生的**旧版备份**仍可能含明文，需以升级后成功走完代理的新备份为准。
 - PDF 文字层索引写在 `no_backup`（不会把加密文档解锁后的正文明文送进系统备份）；打开时会删除早期误放在书籍目录里的 `text-index`
 - 未配置正式签名密钥时，release 构建仍使用 debug 签名，仅便于本机安装，不能当作上架或对外分发的正式签名
 - PDF 全文搜索只覆盖文字层，扫描件或纯图片页无法命中（不做 OCR）
