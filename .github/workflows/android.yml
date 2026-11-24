@@ -26,8 +26,17 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      # android-actions/setup-android@v3 默认 packages 为 "tools platform-tools"。
+      # Google 已下架 tools，sdkmanager 会报 Failed to find package 'tools' 并以退出码 1 失败，
+      # 导致后续 assemble/test/lint 全部 skipped。这里显式安装当前工程所需组件：
+      # compileSdk/targetSdk 35，AGP 8.7.2 默认 build-tools 为 34.0.0（工程未指定 buildToolsVersion）。
+      # 仍接受 SDK 许可证；关闭已接受许可证全文日志，避免刷屏，但不跳过接受步骤。
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;34.0.0"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
 
       - name: Make wrapper executable
         run: chmod +x gradlew
