@@ -39,19 +39,21 @@
 
 release 包默认开启混淆。若未提供正式签名密钥，会使用 debug 签名以便本机安装，**这不是正式发布签名**。如需正式签名，在仓库根目录或 `app/` 下放置已被 git 忽略的 `key.properties`（`storeFile` / `storePassword` / `keyAlias` / `keyPassword`），不要把密钥提交进仓库。已经用 debug 签名安装过的包，换成新密钥后将无法覆盖升级。
 
+正式版支持从本仓库的 GitHub Releases 检查并安装更新（侧载分发）。详情见 [docs/github-release-updates.md](docs/github-release-updates.md)。当前 0.2.3 / versionCode 8 尚未发布带 `update.json` 的正式资产，检查时会视为没有更新。首次对外更新请先递增版本号再发 Release，不要把 CI 里 debug 签名的 fallback 包当作更新资产。若以后上架 Google Play，不能使用本应用内自更新权限方案。检查更新需要设备能访问 GitHub。
+
 ## 单元测试
 
 目前以 `app/src/test` 下的 JVM 单元测试为主，多数覆盖纯逻辑 helper（导入预检、路径安全、进度防抖、位图预算计算、密码策略等），仓库中无仪器测试源码。阅读页与 Compose 位图生命周期、Keystore 真机路径、混淆后的 PdfBox 运行，都还没有集成或真机测试。本环境没有模拟器或已连接设备时，无法做这类验证。
 
-GitHub Actions 工作流 `.github/workflows/android.yml` 会在推送到 `master` 或向 `master` 开 PR 时运行 `assembleDebug`、单元测试和 lint。
+GitHub Actions 工作流 `.github/workflows/android.yml` 会在推送到 `master` 或向 `master` 开 PR 时运行 `assembleDebug`、单元测试、`lintDebug`、`assembleRelease` 和 `lintRelease`。
 
 ## 模块结构
 
 ```
 app/src/main/java/com/vibecoding/reader/
-  ui/home|bookshelf|reader|common|theme   # Compose UI
-  data/db|repo|parser|import|secure
-  domain/model|sync|reader|search|bookshelf
+  ui/home|bookshelf|reader|common|theme|update
+  data/db|repo|parser|import|secure|update
+  domain/model|sync|reader|search|bookshelf|update
   di/                    # 手写 AppContainer
 ```
 
@@ -63,3 +65,4 @@ app/src/main/java/com/vibecoding/reader/
 - PDF 全文搜索只覆盖文字层，扫描件或纯图片页无法命中（不做 OCR）
 - 从单个 content URI 导入 Markdown 时，若提供方不给出父目录，无法复制旁边的本地图片
 - 同步尚未实现
+- 应用内更新依赖 GitHub 网络与已发布的正式 Release；尚无资产时不会提示强制更新。debug 包不自动检查更新。换签名后的旧安装包无法覆盖升级

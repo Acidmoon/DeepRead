@@ -3,6 +3,7 @@ package com.vibecoding.reader.ui.home
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -16,8 +17,12 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -26,7 +31,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +49,7 @@ import com.vibecoding.reader.ui.bookshelf.shelfGridCells
 import com.vibecoding.reader.ui.bookshelf.BookshelfViewModel
 import com.vibecoding.reader.ui.bookshelf.ShelfBookCard
 import com.vibecoding.reader.ui.common.AppBottomStatusBar
+import com.vibecoding.reader.ui.update.UpdateHost
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -70,33 +79,57 @@ fun HomeScreen(
         )
     )
     val recent by recentVm.recentBooks.collectAsStateWithLifecycle()
+    var moreMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             Column(Modifier.fillMaxWidth()) {
-                PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
-                    tabs.forEachIndexed { index, title ->
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = {
-                                scope.launch { pagerState.animateScrollToPage(index) }
-                            },
-                            text = {
-                                Text(
-                                    text = title,
-                                    fontWeight = if (pagerState.currentPage == index) {
-                                        FontWeight.SemiBold
-                                    } else {
-                                        FontWeight.Normal
-                                    }
-                                )
-                            }
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PrimaryTabRow(
+                        selectedTabIndex = pagerState.currentPage,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        tabs.forEachIndexed { index, title ->
+                            Tab(
+                                selected = pagerState.currentPage == index,
+                                onClick = {
+                                    scope.launch { pagerState.animateScrollToPage(index) }
+                                },
+                                text = {
+                                    Text(
+                                        text = title,
+                                        fontWeight = if (pagerState.currentPage == index) {
+                                            FontWeight.SemiBold
+                                        } else {
+                                            FontWeight.Normal
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { moreMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                        }
+                        DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("检查更新") },
+                                onClick = {
+                                    moreMenu = false
+                                    container.updateController.checkManually()
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
     ) { padding ->
+        UpdateHost(
+            controller = container.updateController,
+            autoCheckOnEnter = true
+        )
         // 内容全屏；底部状态叠在内容之上（不占 Scaffold bottomBar 条）
         Box(
             modifier = Modifier
