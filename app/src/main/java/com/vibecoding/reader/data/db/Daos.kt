@@ -76,6 +76,10 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE sourceUri = :sourceUri LIMIT 1")
     suspend fun getBySourceUri(sourceUri: String): BookEntity?
 
+    @Query("SELECT * FROM books WHERE pdfPassword IS NOT NULL AND pdfPassword != ''")
+    suspend fun getWithPlaintextPassword(): List<BookEntity>
+
+
     @Query("SELECT * FROM books WHERE id = :id LIMIT 1")
     fun observeById(id: String): Flow<BookEntity?>
 

@@ -3,6 +3,7 @@ package com.vibecoding.reader.data.db
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.sql.DriverManager
 
 /**
@@ -63,5 +64,20 @@ class AppMigrationsSqlTest {
                 assertTrue(tables.contains("folders"))
             }
         }
+    }
+
+    /**
+     * 核对仓库跟踪的当前 exported schema，不是历史 v1–v7 快照回放。
+     */
+    @Test
+    fun exportedV8SchemaContainsExpectedBookColumns() {
+        val schema = File("schemas/com.vibecoding.reader.data.db.AppDatabase/8.json")
+        assertTrue("exported schema missing: ${schema.absolutePath}", schema.isFile)
+        val text = schema.readText()
+        assertTrue(text.contains("\"version\": 8") || text.contains("\"version\":8"))
+        for (col in listOf("id", "title", "folderId", "pdfPassword", "localPath", "sourceUri")) {
+            assertTrue("missing $col in exported v8 schema", text.contains("\"fieldPath\": \"$col\""))
+        }
+        assertEquals(8, AppMigrations.CURRENT_VERSION)
     }
 }

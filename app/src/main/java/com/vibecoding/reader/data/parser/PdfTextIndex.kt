@@ -6,28 +6,42 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.File
 
 /**
- * 将 PDF 文字层按页缓存到书籍目录，供全文搜索使用。不做 OCR。
+ * 将 PDF 文字层按页缓存，供全文搜索使用。不做 OCR。
+ *
+ * 索引必须放在 [storageDir]（no_backup 下），不能写进可备份的书籍目录：
+ * 加密 PDF 解锁后抽出的正文若落在 filesDir，会随系统备份以明文离开设备。
  */
 object PdfTextIndex {
-    private const val DIR = "text-index"
+    private const val LEGACY_DIR = "text-index"
+    private const val STORAGE_DIR = "pdf-text-index"
     private const val META = "meta.json"
 
-    fun indexDir(bookDir: File): File = File(bookDir, DIR)
+    fun storageDir(noBackupFilesDir: File, bookId: String): File =
+        File(noBackupFilesDir, "$STORAGE_DIR/$bookId")
 
-    fun isUpToDate(bookDir: File, pdfFile: File): Boolean {
-        val metaFile = File(indexDir(bookDir), META)
+    fun deleteStorage(noBackupFilesDir: File, bookId: String) {
+        storageDir(noBackupFilesDir, bookId).deleteRecursively()
+    }
+
+    /** 删除早期写在 filesDir/books/{id}/text-index 的明文缓存，避免进入备份。 */
+    fun deleteLegacyInBookDir(bookDir: File) {
+        File(bookDir, LEGACY_DIR).deleteRecursively()
+    }
+
+    fun isUpToDate(indexDir: File, pdfFile: File): Boolean {
+        val metaFile = File(indexDir, META)
         if (!metaFile.exists()) return false
         return runCatching {
             val meta = readMeta(metaFile)
             meta.length == pdfFile.length() &&
                 meta.mtime == pdfFile.lastModified() &&
                 meta.pages > 0 &&
-                File(indexDir(bookDir), pageFileName(0)).exists()
+                File(indexDir, pageFileName(0)).exists()
         }.getOrDefault(false)
     }
 
-    fun loadPages(bookDir: File): List<String>? {
-        val dir = indexDir(bookDir)
+    fun loadPages(indexDir: File): List<String>? {
+        val dir = indexDir
         val metaFile = File(dir, META)
         if (!metaFile.exists()) return null
         val pages = runCatching { readMeta(metaFile).pages }.getOrDefault(0)
@@ -38,8 +52,8 @@ object PdfTextIndex {
         }
     }
 
-    fun writePages(bookDir: File, pdfFile: File, pages: List<String>) {
-        val dir = indexDir(bookDir).apply { mkdirs() }
+    fun writePages(indexDir: File, pdfFile: File, pages: List<String>) {
+        val dir = indexDir.apply { mkdirs() }
         pages.forEachIndexed { i, text ->
             File(dir, pageFileName(i)).writeText(text)
         }

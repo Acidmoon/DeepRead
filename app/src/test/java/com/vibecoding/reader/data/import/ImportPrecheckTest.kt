@@ -82,4 +82,32 @@ class ImportPrecheckTest {
         val data = ByteArray(100) { 1 }
         ImportPrecheck.copyCapped(ByteArrayInputStream(data), ByteArrayOutputStream(), 50)
     }
+
+    @Test
+    fun effectiveFileNameUsesMimeWhenNoExtension() {
+        assertEquals("未命名文档.pdf", ImportPrecheck.effectiveFileName(null, "application/pdf"))
+        assertEquals(
+            "document.pdf",
+            ImportPrecheck.effectiveFileName("document", "Application/PDF; charset=binary")
+        )
+        assertEquals("a.pdf", ImportPrecheck.effectiveFileName("a.pdf", "text/plain"))
+        assertEquals("未命名文档", ImportPrecheck.effectiveFileName(null, null))
+    }
+
+    @Test
+    fun resolveFormatAcceptsMimeCaseAndParameters() {
+        assertEquals(BookFormat.PDF, ImportPrecheck.resolveFormat("document", "Application/PDF"))
+        assertEquals(
+            BookFormat.PDF,
+            ImportPrecheck.resolveFormat("document", "application/pdf; charset=binary")
+        )
+        assertEquals(BookFormat.MD, ImportPrecheck.resolveFormat("x", "text/markdown"))
+    }
+
+    @Test
+    fun noReadPermissionMessageMentionsSource() {
+        val msg = ImportPrecheck.noReadPermissionMessage("笔记.pdf")
+        assertTrue(msg.contains("权限"))
+        assertTrue(msg.contains("笔记.pdf"))
+    }
 }

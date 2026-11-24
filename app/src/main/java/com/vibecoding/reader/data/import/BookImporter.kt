@@ -145,10 +145,17 @@ class BookImporter(
         folderId: String? = null,
         displayNameOverride: String? = null
     ): ImportOutcome {
-        val name = displayNameOverride
-            ?: queryDisplayName(uri)
-            ?: "未命名文档"
-        val mime = context.contentResolver.getType(uri)
+        val mime = try {
+            context.contentResolver.getType(uri)
+        } catch (e: SecurityException) {
+            error(ImportPrecheck.noReadPermissionMessage(uri.toString()))
+        }
+        val rawName = displayNameOverride ?: try {
+            queryDisplayName(uri)
+        } catch (e: SecurityException) {
+            error(ImportPrecheck.noReadPermissionMessage(uri.toString()))
+        }
+        val name = ImportPrecheck.effectiveFileName(rawName, mime)
         if (ImportPrecheck.isLegacyMsWord(name, mime)) {
             error(ImportPrecheck.legacyMsWordMessage(name))
         }
@@ -185,11 +192,15 @@ class BookImporter(
 
         try {
             val maxBytes = ImportPrecheck.limitFor(format)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                dest.outputStream().use { output ->
-                    ImportPrecheck.copyCapped(input, output, maxBytes)
-                }
-            } ?: error("无法读取文件：$name")
+            try {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { output ->
+                        ImportPrecheck.copyCapped(input, output, maxBytes)
+                    }
+                } ?: error("无法读取文件：$name")
+            } catch (e: SecurityException) {
+                error(ImportPrecheck.noReadPermissionMessage(name))
+            }
 
             if (dest.length() <= 0L) error("文件为空或无法读取")
 
@@ -318,6 +329,7 @@ class BookImporter(
         bookDir: File
     ): Pair<String, Int> {
         val doc = DocumentFile.fromSingleUri(context, uri) ?: return raw to 0
+        // 单文件 content URI 通常没有可枚举的父目录，此时无法复制相对图片（不是实现遗漏）
         val parent = doc.parentFile ?: return raw to 0
         val media = File(bookDir, "media").apply { mkdirs() }
         val mapped = LinkedHashMap<String, String>()

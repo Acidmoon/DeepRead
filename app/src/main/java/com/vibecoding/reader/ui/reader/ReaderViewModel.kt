@@ -208,7 +208,7 @@ class ReaderViewModel(
                 )
             }
             if (book.format == BookFormat.PDF) {
-                startPdfTextIndex(file, file.parentFile, pdfPassword)
+                startPdfTextIndex(file, book.id, file.parentFile, pdfPassword)
             }
         }.onFailure { e ->
             _content.update {
@@ -250,12 +250,16 @@ class ReaderViewModel(
     fun savePdfPassword(password: String) {
         viewModelScope.launch {
             val b = bookRepository.getBook(bookId) ?: return@launch
-            runCatching { PdfPasswordStore.get(appContext).put(bookId, password) }
-            if (!b.pdfPassword.isNullOrEmpty()) {
-                bookRepository.upsert(
-                    b.copy(pdfPassword = null, updatedAt = System.currentTimeMillis())
-                )
-            }
+            val stored = runCatching {
+                PdfPasswordStore.get(appContext).put(bookId, password)
+                true
+            }.getOrDefault(false)
+            PdfPasswordAccess.clearPlaintextIfVaultOk(
+                appContext,
+                b,
+                bookRepository,
+                vaultWriteSucceeded = stored
+            )
             _pdfUnlockPassword.value = password
             refreshEncryptedPdfExtras(b.copy(pdfPassword = null), password)
         }
@@ -294,24 +298,27 @@ class ReaderViewModel(
                 )
             }
         }
-        startPdfTextIndex(file, dir, password)
+        startPdfTextIndex(file, book.id, dir, password)
     }
 
-    private fun startPdfTextIndex(file: File, bookDir: File?, password: String?) {
-        if (bookDir == null) return
+    private fun startPdfTextIndex(file: File, bookId: String, bookDir: File?, password: String?) {
         pdfIndexJob?.cancel()
         pdfIndexJob = viewModelScope.launch(Dispatchers.IO) {
+            if (bookDir != null) {
+                runCatching { PdfTextIndex.deleteLegacyInBookDir(bookDir) }
+            }
+            val indexDir = PdfTextIndex.storageDir(appContext.noBackupFilesDir, bookId)
             _pdfIndexMessage.value = "正在建立文字索引…"
             val result = runCatching {
-                val cached = if (PdfTextIndex.isUpToDate(bookDir, file)) {
-                    PdfTextIndex.loadPages(bookDir)
+                val cached = if (PdfTextIndex.isUpToDate(indexDir, file)) {
+                    PdfTextIndex.loadPages(indexDir)
                 } else {
                     null
                 }
                 cached ?: run {
                     PdfOutlineParser.ensureInitialized(appContext)
                     val pages = PdfTextIndex.extractAll(file, password)
-                    PdfTextIndex.writePages(bookDir, file, pages)
+                    PdfTextIndex.writePages(indexDir, file, pages)
                     pages
                 }
             }

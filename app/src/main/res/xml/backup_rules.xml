@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  书架数据库（书籍、进度、书签、设置）参与系统备份。
-  PDF 打开密码放在 no_backup 目录并用 Keystore 加密，不写在此排除列表里“关掉整个书架备份”。
+  API 23–30（android:fullBackupContent）。
+  只要写出任意 <include>，就不再走“备份几乎全部文件”的默认配置，必须显式列出 domain。
+  空的 <full-backup-content/> 在部分版本上会被理解成什么都不备份，因此这里写清楚。
+  no_backup 目录由系统排除（PDF 密码保险箱、PDF 文字索引），不要试图备份。
 -->
 <full-backup-content>
+    <include domain="file" path="." />
+    <include domain="database" path="." />
+    <include domain="sharedpref" path="." />
 </full-backup-content>

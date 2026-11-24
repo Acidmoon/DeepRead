@@ -25,6 +25,31 @@ object ImportPrecheck {
     fun resolveFormat(fileName: String, mime: String?): BookFormat? =
         BookFormat.fromFileName(fileName) ?: BookFormat.fromMime(mime)
 
+    /**
+     * 外部打开时常没有文件名或只有无扩展名的 document id。
+     * 能从 MIME 判断格式时补上扩展名，便于标题和格式识别。
+     */
+    fun effectiveFileName(displayName: String?, mime: String?): String {
+        val raw = displayName?.substringAfterLast('/')?.trim().orEmpty()
+        if (BookFormat.fromFileName(raw) != null) return raw
+        val ext = extensionForMime(mime)
+        val base = raw.substringBeforeLast('.').ifBlank { "未命名文档" }
+        return if (ext != null) "$base.$ext" else raw.ifBlank { "未命名文档" }
+    }
+
+    fun extensionForMime(mime: String?): String? =
+        when (BookFormat.fromMime(mime)) {
+            BookFormat.TXT -> "txt"
+            BookFormat.MD -> "md"
+            BookFormat.EPUB -> "epub"
+            BookFormat.PDF -> "pdf"
+            BookFormat.DOCX -> "docx"
+            null -> null
+        }
+
+    fun noReadPermissionMessage(fileName: String): String =
+        "没有读取该文件的权限：$fileName。请在来源应用中再次选择打开，或改用应用内导入"
+
     fun unsupportedFormatMessage(fileName: String): String =
         "不支持的格式：$fileName（支持 TXT / MD / EPUB / PDF / DOCX）"
 

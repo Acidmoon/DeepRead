@@ -41,7 +41,7 @@ release 包默认开启混淆。若未提供正式签名密钥，会使用 debug
 
 ## 单元测试
 
-目前以 `app/src/test` 下的 JVM 单元测试为主，仓库中无仪器测试源码。本环境没有模拟器或已连接设备时，无法做真机或仪表测试。
+目前以 `app/src/test` 下的 JVM 单元测试为主，多数覆盖纯逻辑 helper（导入预检、路径安全、进度防抖、位图预算计算、密码策略等），仓库中无仪器测试源码。阅读页与 Compose 位图生命周期、Keystore 真机路径、混淆后的 PdfBox 运行，都还没有集成或真机测试。本环境没有模拟器或已连接设备时，无法做这类验证。
 
 GitHub Actions 工作流 `.github/workflows/android.yml` 会在推送到 `master` 或向 `master` 开 PR 时运行 `assembleDebug`、单元测试和 lint。
 
@@ -57,7 +57,8 @@ app/src/main/java/com/vibecoding/reader/
 
 ## 已知限制
 
-- 加密 PDF 的打开密码经 Android Keystore 加密后存放在应用的 `no_backup` 目录，不随系统备份迁移；恢复备份后可能需要重新输入密码
+- 加密 PDF 的打开密码经 Android Keystore 加密后存放在应用的 `no_backup` 目录，不随系统备份迁移；升级时会把库里旧明文迁入保险箱并做 WAL checkpoint / VACUUM，但恢复备份或换机后 Keystore 密钥不可用，可能需要重新输入密码
+- PDF 文字层索引写在 `no_backup`（不会把加密文档解锁后的正文明文送进系统备份）；打开时会删除早期误放在书籍目录里的 `text-index`
 - 未配置正式签名密钥时，release 构建仍使用 debug 签名，仅便于本机安装，不能当作上架或对外分发的正式签名
 - PDF 全文搜索只覆盖文字层，扫描件或纯图片页无法命中（不做 OCR）
 - 从单个 content URI 导入 Markdown 时，若提供方不给出父目录，无法复制旁边的本地图片

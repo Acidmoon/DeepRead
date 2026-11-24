@@ -25,7 +25,24 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookmarkDao(): BookmarkDao
     abstract fun settingsDao(): SettingsDao
 
+    /**
+     * 清空 pdfPassword 列之后调用：把 WAL 合入主库并 VACUUM，
+     * 减少更新后页内未使用空间里残留的明文被系统备份带走。
+     * 不能在事务中调用。
+     */
+    fun scrubAfterPasswordClear() {
+        synchronized(scrubLock) {
+            val db = openHelper.writableDatabase
+            db.query("PRAGMA wal_checkpoint(TRUNCATE)").use { cursor ->
+                cursor.moveToFirst()
+            }
+            db.execSQL("VACUUM")
+        }
+    }
+
     companion object {
+        private val scrubLock = Any()
+
         @Volatile
         private var instance: AppDatabase? = null
 

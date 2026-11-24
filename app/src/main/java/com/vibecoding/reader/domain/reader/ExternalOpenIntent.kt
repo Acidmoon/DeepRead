@@ -14,4 +14,14 @@ object ExternalOpenIntent {
         val data = dataString?.trim().orEmpty()
         return data.takeIf { it.isNotEmpty() }
     }
+
+    /**
+     * 同一 URI 已在待处理队列中时忽略重复 offer（onCreate + onNewIntent 或重复投递）。
+     * 消费之后再次出现同一 URI 仍会接受，以便用户重新打开。
+     */
+    fun shouldOffer(pendingUri: String?, incomingUri: String): Boolean {
+        val incoming = incomingUri.trim()
+        if (incoming.isEmpty()) return false
+        return pendingUri != incoming
+    }
 }

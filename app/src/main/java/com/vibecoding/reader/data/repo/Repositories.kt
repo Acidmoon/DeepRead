@@ -13,6 +13,7 @@ import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.ShelfItem
+import com.vibecoding.reader.data.storage.BookDiskCleanup
 import com.vibecoding.reader.domain.reader.BookOrganize
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -23,7 +24,8 @@ import java.util.UUID
 class FolderRepository(
     private val folderDao: FolderDao,
     private val bookDao: BookDao,
-    private val bookmarkDao: BookmarkDao
+    private val bookmarkDao: BookmarkDao,
+    private val diskCleanup: BookDiskCleanup? = null
 ) {
     fun observeFolders(): Flow<List<BookFolder>> =
         folderDao.observeAll().map { list -> list.map { it.toDomain() } }
@@ -68,10 +70,14 @@ class FolderRepository(
             books.forEach { entity ->
                 bookmarkDao.deleteByBook(entity.id)
                 bookDao.deleteById(entity.id)
-                runCatching {
-                    File(entity.localPath).parentFile
-                        ?.takeIf { it.name == entity.id }
-                        ?.deleteRecursively()
+                if (diskCleanup != null) {
+                    diskCleanup.deleteFor(entity.id, entity.localPath)
+                } else {
+                    runCatching {
+                        File(entity.localPath).parentFile
+                            ?.takeIf { it.name == entity.id }
+                            ?.deleteRecursively()
+                    }
                 }
             }
         } else {
@@ -85,7 +91,8 @@ class FolderRepository(
 class BookRepository(
     private val bookDao: BookDao,
     private val bookmarkDao: BookmarkDao,
-    private val folderDao: FolderDao? = null
+    private val folderDao: FolderDao? = null,
+    private val diskCleanup: BookDiskCleanup? = null
 ) {
     fun observeBooks(): Flow<List<Book>> =
         bookDao.observeAll().map { list -> list.map { it.toDomain() } }
@@ -108,6 +115,9 @@ class BookRepository(
         if (sourceUri.isBlank()) return null
         return bookDao.getBySourceUri(sourceUri)?.toDomain()
     }
+
+    suspend fun getWithPlaintextPassword(): List<Book> =
+        bookDao.getWithPlaintextPassword().map { it.toDomain() }
 
     suspend fun upsert(book: Book) {
         bookDao.upsert(BookEntity.fromDomain(book))
@@ -135,12 +145,16 @@ class BookRepository(
     suspend fun deleteBook(book: Book) {
         bookmarkDao.deleteByBook(book.id)
         bookDao.deleteById(book.id)
-        runCatching {
-            val file = File(book.localPath)
-            val parent = file.parentFile
-            if (file.exists()) file.delete()
-            parent?.listFiles()?.let { if (it.isEmpty()) parent.delete() }
-            parent?.takeIf { it.name == book.id }?.deleteRecursively()
+        if (diskCleanup != null) {
+            diskCleanup.deleteFor(book.id, book.localPath)
+        } else {
+            runCatching {
+                val file = File(book.localPath)
+                val parent = file.parentFile
+                if (file.exists()) file.delete()
+                parent?.listFiles()?.let { if (it.isEmpty()) parent.delete() }
+                parent?.takeIf { it.name == book.id }?.deleteRecursively()
+            }
         }
     }
 }
