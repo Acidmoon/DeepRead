@@ -2,6 +2,7 @@ package com.vibecoding.reader.di
 
 import android.content.Context
 import android.net.Uri
+import com.vibecoding.reader.BuildConfig
 import com.vibecoding.reader.data.db.AppDatabase
 import com.vibecoding.reader.data.import.BookImporter
 import com.vibecoding.reader.data.repo.BookRepository
@@ -11,6 +12,12 @@ import com.vibecoding.reader.data.repo.SettingsRepository
 import com.vibecoding.reader.data.repo.ShelfRepository
 import com.vibecoding.reader.data.secure.PdfPasswordAccess
 import com.vibecoding.reader.data.storage.BookDiskCleanup
+import com.vibecoding.reader.data.update.GithubUpdateRepository
+import com.vibecoding.reader.data.update.UpdateApkVerifier
+import com.vibecoding.reader.data.update.UpdateController
+import com.vibecoding.reader.data.update.UpdateFileStore
+import com.vibecoding.reader.data.update.UrlConnectionUpdateHttpClient
+import com.vibecoding.reader.domain.update.GithubRepo
 import com.vibecoding.reader.domain.reader.ExternalOpenIntent
 import com.vibecoding.reader.domain.sync.NoOpSyncPort
 import com.vibecoding.reader.domain.sync.SyncPort
@@ -62,8 +69,23 @@ class AppContainer(context: Context) {
     val syncPort: SyncPort = NoOpSyncPort()
     val externalOpen = ExternalOpenController()
 
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val updateController = UpdateController(
+        context = appContext,
+        enabled = BuildConfig.UPDATE_CHECKS_ENABLED,
+        currentVersionCode = BuildConfig.VERSION_CODE,
+        repository = GithubUpdateRepository(
+            http = UrlConnectionUpdateHttpClient(),
+            repo = GithubRepo(BuildConfig.UPDATE_GITHUB_OWNER, BuildConfig.UPDATE_GITHUB_REPO),
+            userAgent = "DeepRead/${BuildConfig.VERSION_NAME} (Android)"
+        ),
+        store = UpdateFileStore(appContext),
+        verifier = UpdateApkVerifier(appContext.packageManager, appContext.packageName),
+        scope = appScope
+    )
+
     init {
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        appScope.launch {
             runCatching { PdfPasswordAccess.migrateLegacyAll(appContext, bookRepository) }
         }
     }

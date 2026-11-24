@@ -22,3 +22,7 @@ out/
 key.properties
 *.jks
 *.keystore
+
+# Python tooling
+__pycache__/
+*.py[cod]

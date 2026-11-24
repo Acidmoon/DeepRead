@@ -17,3 +17,7 @@
 
 # 清单引用的备份代理，避免 release 混淆后系统无法实例化
 -keep class com.vibecoding.reader.data.backup.ReaderBackupAgent { *; }
+
+# 清单注册的更新安装回调，避免 release 混淆后系统无法实例化
+-keep class com.vibecoding.reader.data.update.UpdateInstallStatusReceiver { *; }
+-keep class androidx.core.content.FileProvider { *; }

@@ -19,6 +19,10 @@ android {
         versionCode = 8
         versionName = "0.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // debug 默认关闭自动检查；release 在对应 buildType 里打开。不向包内写入任何令牌。
+        buildConfigField("boolean", "UPDATE_CHECKS_ENABLED", "false")
+        buildConfigField("String", "UPDATE_GITHUB_OWNER", "\"Acidmoon\"")
+        buildConfigField("String", "UPDATE_GITHUB_REPO", "\"DeepRead\"")
     }
 
     signingConfigs {
@@ -44,11 +48,13 @@ android {
         release {
             isMinifyEnabled = true
             // 没有正式密钥时继续用 debug 签名，便于本机安装；这不是正式发布签名。
+            // 正式更新资产绝不能使用这种 fallback 包，见 docs/github-release-updates.md。
             signingConfig = if (signingConfigs.findByName("release") != null) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
             }
+            buildConfigField("boolean", "UPDATE_CHECKS_ENABLED", "true")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
