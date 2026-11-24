@@ -9,6 +9,7 @@ import com.vibecoding.reader.data.parser.EbookLoader
 import com.vibecoding.reader.data.parser.EpubParser
 import com.vibecoding.reader.data.parser.ImagePathResolver
 import com.vibecoding.reader.data.parser.SafeLocalPath
+import com.vibecoding.reader.data.secure.PdfPasswordAccess
 import com.vibecoding.reader.data.parser.PdfOutlineParser
 import com.vibecoding.reader.data.parser.TxtParser
 import com.vibecoding.reader.data.repo.BookRepository
@@ -280,7 +281,7 @@ class BookImporter(
             localFile = local,
             bookDir = dir,
             title = book.title,
-            password = book.pdfPassword
+            password = PdfPasswordAccess.resolve(context, book, bookRepository)
         )
         if (result.coverPath.isNullOrBlank()) return@withContext book
         val updated = book.copy(

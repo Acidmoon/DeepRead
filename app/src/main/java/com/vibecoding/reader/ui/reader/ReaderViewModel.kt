@@ -9,6 +9,8 @@ import com.vibecoding.reader.data.import.CoverGenerator
 import com.vibecoding.reader.data.parser.EbookLoader
 import com.vibecoding.reader.data.parser.PdfOutlineParser
 import com.vibecoding.reader.data.parser.PdfTextIndex
+import com.vibecoding.reader.data.secure.PdfPasswordAccess
+import com.vibecoding.reader.data.secure.PdfPasswordStore
 import com.vibecoding.reader.domain.search.PdfTextSearch
 import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.data.repo.BookRepository
@@ -77,6 +79,9 @@ class ReaderViewModel(
     private val _pdfIndexMessage = MutableStateFlow<String?>(null)
     val pdfIndexMessage: StateFlow<String?> = _pdfIndexMessage.asStateFlow()
 
+    private val _pdfUnlockPassword = MutableStateFlow<String?>(null)
+    val pdfUnlockPassword: StateFlow<String?> = _pdfUnlockPassword.asStateFlow()
+
     private val _jumpPosition = MutableStateFlow<String?>(null)
     val jumpPosition: StateFlow<String?> = _jumpPosition.asStateFlow()
 
@@ -106,6 +111,12 @@ class ReaderViewModel(
 
     private suspend fun loadContent(book: Book) {
         val file = File(book.localPath)
+        val pdfPassword = if (book.format == BookFormat.PDF) {
+            PdfPasswordAccess.resolve(appContext, book, bookRepository)
+        } else null
+        if (book.format == BookFormat.PDF) {
+            _pdfUnlockPassword.value = pdfPassword
+        }
         val size = BookLoadGuard.fileSize(file)
         val pre = BookLoadGuard.precheck(file, book.format)
         if (pre != null) {
@@ -166,7 +177,7 @@ class ReaderViewModel(
                                         )
                                     ).use { it.pageCount }
                                 }.getOrDefault(0)
-                                PdfOutlineParser.parseOutline(file, pageCount, book.pdfPassword).also {
+                                PdfOutlineParser.parseOutline(file, pageCount, pdfPassword).also {
                                     BookImporter.saveTocForBook(appContext, book.id, it)
                                 }
                             }
@@ -197,7 +208,7 @@ class ReaderViewModel(
                 )
             }
             if (book.format == BookFormat.PDF) {
-                startPdfTextIndex(file, file.parentFile, book.pdfPassword)
+                startPdfTextIndex(file, file.parentFile, pdfPassword)
             }
         }.onFailure { e ->
             _content.update {
@@ -239,12 +250,14 @@ class ReaderViewModel(
     fun savePdfPassword(password: String) {
         viewModelScope.launch {
             val b = bookRepository.getBook(bookId) ?: return@launch
-            val updated = if (b.pdfPassword != password) {
-                b.copy(pdfPassword = password, updatedAt = System.currentTimeMillis()).also {
-                    bookRepository.upsert(it)
-                }
-            } else b
-            refreshEncryptedPdfExtras(updated, password)
+            runCatching { PdfPasswordStore.get(appContext).put(bookId, password) }
+            if (!b.pdfPassword.isNullOrEmpty()) {
+                bookRepository.upsert(
+                    b.copy(pdfPassword = null, updatedAt = System.currentTimeMillis())
+                )
+            }
+            _pdfUnlockPassword.value = password
+            refreshEncryptedPdfExtras(b.copy(pdfPassword = null), password)
         }
     }
 

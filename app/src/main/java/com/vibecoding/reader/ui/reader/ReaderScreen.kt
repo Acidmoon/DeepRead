@@ -116,6 +116,7 @@ fun ReaderScreen(
     val jumpPosition by viewModel.jumpPosition.collectAsStateWithLifecycle()
     val pdfPageTexts by viewModel.pdfPageTexts.collectAsStateWithLifecycle()
     val pdfIndexMessage by viewModel.pdfIndexMessage.collectAsStateWithLifecycle()
+    val pdfUnlockPassword by viewModel.pdfUnlockPassword.collectAsStateWithLifecycle()
 
     var showChrome by remember { mutableStateOf(false) }
     var sheetKind by remember { mutableStateOf<SheetKind?>(null) }
@@ -319,7 +320,7 @@ fun ReaderScreen(
                                         modifier = Modifier.fillMaxSize(),
                                         bottomSafeInset = bottomSafeInset,
                                         pauseAutoTurn = pauseAutoTurn,
-                                        storedPassword = book!!.pdfPassword,
+                                        storedPassword = pdfUnlockPassword,
                                         onPasswordVerified = viewModel::savePdfPassword
                                     )
                                 }

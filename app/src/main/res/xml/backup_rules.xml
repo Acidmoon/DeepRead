@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  书架数据库（书籍、进度、书签、设置）参与系统备份。
+  PDF 打开密码放在 no_backup 目录并用 Keystore 加密，不写在此排除列表里“关掉整个书架备份”。
+-->
+<full-backup-content>
+</full-backup-content>
