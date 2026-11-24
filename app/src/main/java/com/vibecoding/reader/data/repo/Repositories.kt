@@ -104,6 +104,11 @@ class BookRepository(
 
     suspend fun getBook(id: String): Book? = bookDao.getById(id)?.toDomain()
 
+    suspend fun getBySourceUri(sourceUri: String): Book? {
+        if (sourceUri.isBlank()) return null
+        return bookDao.getBySourceUri(sourceUri)?.toDomain()
+    }
+
     suspend fun upsert(book: Book) {
         bookDao.upsert(BookEntity.fromDomain(book))
         book.folderId?.let { folderDao?.touch(it, System.currentTimeMillis()) }

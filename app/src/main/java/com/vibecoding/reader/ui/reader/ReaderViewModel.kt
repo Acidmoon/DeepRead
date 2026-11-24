@@ -17,9 +17,11 @@ import com.vibecoding.reader.domain.model.EbookBlock
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.reader.BookLoadGuard
+import com.vibecoding.reader.domain.reader.ProgressSaveController
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,9 +70,10 @@ class ReaderViewModel(
     private val _jumpPosition = MutableStateFlow<String?>(null)
     val jumpPosition: StateFlow<String?> = _jumpPosition.asStateFlow()
 
-    private var progressJob: Job? = null
     private var loadJob: Job? = null
-    private var lastSavedPosition: String? = null
+    private val progressSave = ProgressSaveController { position, progress ->
+        bookRepository.updateProgress(bookId, position, progress)
+    }
 
     init {
         reload()
@@ -194,21 +197,28 @@ class ReaderViewModel(
     }
 
     fun saveProgress(position: String, progress: Float) {
-        if (position == lastSavedPosition) return
-        progressJob?.cancel()
-        progressJob = viewModelScope.launch {
-            delay(350)
-            lastSavedPosition = position
-            bookRepository.updateProgress(bookId, position, progress.coerceIn(0f, 1f))
-        }
+        progressSave.onProgress(position, progress, viewModelScope)
     }
 
     fun saveProgressNow(position: String, progress: Float) {
-        progressJob?.cancel()
-        lastSavedPosition = position
+        progressSave.updateLatest(position, progress)
         viewModelScope.launch {
-            bookRepository.updateProgress(bookId, position, progress.coerceIn(0f, 1f))
+            withContext(NonCancellable) {
+                progressSave.flush()
+            }
         }
+    }
+
+    override fun onCleared() {
+        if (progressSave.hasUnsaved) {
+            // viewModelScope 即将取消，这里短阻塞确保最后一次进度写入
+            runBlocking {
+                withContext(NonCancellable) {
+                    progressSave.flush()
+                }
+            }
+        }
+        super.onCleared()
     }
 
     /** 加密 PDF 解锁成功后把密码记在本地，下次免输入 */

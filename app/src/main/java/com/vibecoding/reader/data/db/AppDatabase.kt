@@ -6,7 +6,6 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.vibecoding.reader.domain.model.PageTurnMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -137,12 +136,8 @@ abstract class AppDatabase : RoomDatabase() {
                             val existing = built.settingsDao().get()
                             if (existing == null) {
                                 built.settingsDao().upsert(ReadingSettingsEntity.default())
-                            } else if (existing.pageTurnMode == PageTurnMode.BOTH.name) {
-                                // 产品默认改为上下滚动：迁移旧版默认 BOTH
-                                built.settingsDao().upsert(
-                                    existing.copy(pageTurnMode = PageTurnMode.VERTICAL.name)
-                                )
                             }
+                            // 不再把用户选择的 BOTH（滑动+点按）改回 VERTICAL
                         }
                     }
             }

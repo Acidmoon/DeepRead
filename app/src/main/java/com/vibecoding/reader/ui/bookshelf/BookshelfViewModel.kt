@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.vibecoding.reader.data.import.BookImporter
+import com.vibecoding.reader.data.import.ImportResult
 import com.vibecoding.reader.data.repo.BookRepository
 import com.vibecoding.reader.data.repo.FolderRepository
 import com.vibecoding.reader.data.repo.ShelfRepository
@@ -98,7 +99,7 @@ class BookshelfViewModel(
             _ui.update {
                 it.copy(
                     isImporting = false,
-                    message = formatImportMessage(result.books.size, result.errors, folderId != null)
+                    message = formatImportMessage(result, folderId != null)
                 )
             }
         }
@@ -122,9 +123,14 @@ class BookshelfViewModel(
                 val folderHint = treeResult.folder?.let { "到「${it.name}」" }
                     ?: if (_folderId.value != null) "到当前文件夹" else ""
                 val msg = buildString {
-                    if (treeResult.result.books.isNotEmpty()) {
-                        append("已从目录导入 ${treeResult.result.books.size} 本")
+                    val fresh = treeResult.result.books.size - treeResult.result.reusedCount
+                    if (fresh > 0) {
+                        append("已从目录导入 ${fresh} 本")
                         append(folderHint)
+                    }
+                    if (treeResult.result.reusedCount > 0) {
+                        if (isNotEmpty()) append("，")
+                        append("${treeResult.result.reusedCount} 本已在书架中，未重复导入")
                     }
                     if (treeResult.result.errors.isNotEmpty()) {
                         if (isNotEmpty()) append("；")
@@ -148,18 +154,22 @@ class BookshelfViewModel(
     }
 
     private fun formatImportMessage(
-        count: Int,
-        errors: List<String>,
+        result: ImportResult,
         intoFolder: Boolean
     ): String? = buildString {
-        if (count > 0) {
-            append("已导入 $count 本")
+        val fresh = result.books.size - result.reusedCount
+        if (fresh > 0) {
+            append("已导入 $fresh 本")
             if (intoFolder) append("到当前文件夹")
         }
-        if (errors.isNotEmpty()) {
+        if (result.reusedCount > 0) {
+            if (isNotEmpty()) append("，")
+            append("${result.reusedCount} 本已在书架中，未重复导入")
+        }
+        if (result.errors.isNotEmpty()) {
             if (isNotEmpty()) append("；")
-            append(errors.first())
-            if (errors.size > 1) append(" 等${errors.size}个错误")
+            append(result.errors.first())
+            if (result.errors.size > 1) append(" 等${result.errors.size}个错误")
         }
     }.ifBlank { null }
 
