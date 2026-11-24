@@ -9,6 +9,7 @@ import com.vibecoding.reader.data.import.ImportResult
 import com.vibecoding.reader.data.repo.BookRepository
 import com.vibecoding.reader.data.repo.FolderRepository
 import com.vibecoding.reader.data.repo.ShelfRepository
+import com.vibecoding.reader.domain.bookshelf.ShelfSearch
 import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFolder
 import com.vibecoding.reader.domain.model.ShelfItem
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -46,8 +48,11 @@ class BookshelfViewModel(
     )
     val ui: StateFlow<BookshelfUiState> = _ui.asStateFlow()
 
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val shelfItems: StateFlow<List<ShelfItem>> = _folderId
+    private val rawShelfItems: StateFlow<List<ShelfItem>> = _folderId
         .flatMapLatest { folderId ->
             if (folderId == null) {
                 shelfRepository.observeRootShelf()
@@ -58,6 +63,27 @@ class BookshelfViewModel(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val shelfItems: StateFlow<List<ShelfItem>> = combine(
+        rawShelfItems,
+        _searchQuery,
+        bookRepository.observeBooks()
+    ) { items, query, allBooks ->
+        val extra = if (_folderId.value == null && query.isNotBlank()) {
+            allBooks.filter { it.folderId != null }
+        } else {
+            emptyList()
+        }
+        ShelfSearch.filter(items, query, extra)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val isShelfEmpty: StateFlow<Boolean> = rawShelfItems
+        .map { it.isEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
 
     private val coverEnsuredIds = Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -75,7 +101,7 @@ class BookshelfViewModel(
         }
 
         viewModelScope.launch {
-            shelfItems.collect { items ->
+            rawShelfItems.collect { items ->
                 items.filterIsInstance<ShelfItem.BookItem>().forEach { item ->
                     val book = item.book
                     if (coverEnsuredIds.add(book.id)) {

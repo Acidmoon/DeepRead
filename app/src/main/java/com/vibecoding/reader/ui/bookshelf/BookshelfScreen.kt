@@ -30,7 +30,9 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -99,6 +101,8 @@ fun BookshelfScreen(
     embeddedInHome: Boolean = false
 ) {
     val shelfItems by viewModel.shelfItems.collectAsStateWithLifecycle()
+    val isShelfEmpty by viewModel.isShelfEmpty.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -216,7 +220,7 @@ fun BookshelfScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (shelfItems.isEmpty() && !ui.isImporting) {
+            if (isShelfEmpty && !ui.isImporting && searchQuery.isBlank()) {
                 EmptyBookshelf(
                     inFolder = inFolder,
                     modifier = Modifier.align(Alignment.Center),
@@ -226,6 +230,32 @@ fun BookshelfScreen(
                     } else null
                 )
             } else {
+                Column(Modifier.fillMaxSize()) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = viewModel::setSearchQuery,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                        singleLine = true,
+                        label = { Text("搜索书名或作者") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotBlank()) {
+                                IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                    Icon(Icons.Default.Close, contentDescription = "清除搜索")
+                                }
+                            }
+                        }
+                    )
+                    if (shelfItems.isEmpty() && searchQuery.isNotBlank()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "没有匹配「$searchQuery」的书或文件夹",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    } else {
                 LazyVerticalGrid(
                     columns = shelfGridCells(),
                     contentPadding = PaddingValues(
@@ -271,6 +301,8 @@ fun BookshelfScreen(
                                 )
                             }
                         }
+                    }
+                }
                     }
                 }
             }

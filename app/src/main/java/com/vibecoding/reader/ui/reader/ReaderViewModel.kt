@@ -5,8 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.vibecoding.reader.data.import.BookImporter
+import com.vibecoding.reader.data.import.CoverGenerator
 import com.vibecoding.reader.data.parser.EbookLoader
 import com.vibecoding.reader.data.parser.PdfOutlineParser
+import com.vibecoding.reader.data.parser.PdfTextIndex
+import com.vibecoding.reader.domain.search.PdfTextSearch
+import com.vibecoding.reader.domain.search.TextSearch
 import com.vibecoding.reader.data.repo.BookRepository
 import com.vibecoding.reader.data.repo.BookmarkRepository
 import com.vibecoding.reader.data.repo.SettingsRepository
@@ -67,10 +71,17 @@ class ReaderViewModel(
     private val _content = MutableStateFlow(ReaderContentState())
     val content: StateFlow<ReaderContentState> = _content.asStateFlow()
 
+    private val _pdfPageTexts = MutableStateFlow<List<String>?>(null)
+    val pdfPageTexts: StateFlow<List<String>?> = _pdfPageTexts.asStateFlow()
+
+    private val _pdfIndexMessage = MutableStateFlow<String?>(null)
+    val pdfIndexMessage: StateFlow<String?> = _pdfIndexMessage.asStateFlow()
+
     private val _jumpPosition = MutableStateFlow<String?>(null)
     val jumpPosition: StateFlow<String?> = _jumpPosition.asStateFlow()
 
     private var loadJob: Job? = null
+    private var pdfIndexJob: Job? = null
     private val progressSave = ProgressSaveController { position, progress ->
         bookRepository.updateProgress(bookId, position, progress)
     }
@@ -155,7 +166,7 @@ class ReaderViewModel(
                                         )
                                     ).use { it.pageCount }
                                 }.getOrDefault(0)
-                                PdfOutlineParser.parseOutline(file, pageCount).also {
+                                PdfOutlineParser.parseOutline(file, pageCount, book.pdfPassword).also {
                                     BookImporter.saveTocForBook(appContext, book.id, it)
                                 }
                             }
@@ -184,6 +195,9 @@ class ReaderViewModel(
                     markdownSource = loaded.markdownSource,
                     blocks = loaded.blocks
                 )
+            }
+            if (book.format == BookFormat.PDF) {
+                startPdfTextIndex(file, file.parentFile, book.pdfPassword)
             }
         }.onFailure { e ->
             _content.update {
@@ -221,17 +235,79 @@ class ReaderViewModel(
         super.onCleared()
     }
 
-    /** 加密 PDF 解锁成功后把密码记在本地，下次免输入 */
+    /** 加密 PDF 解锁成功后把密码记在本地，并补封面、目录和文字索引 */
     fun savePdfPassword(password: String) {
         viewModelScope.launch {
             val b = bookRepository.getBook(bookId) ?: return@launch
-            if (b.pdfPassword != password) {
+            val updated = if (b.pdfPassword != password) {
+                b.copy(pdfPassword = password, updatedAt = System.currentTimeMillis()).also {
+                    bookRepository.upsert(it)
+                }
+            } else b
+            refreshEncryptedPdfExtras(updated, password)
+        }
+    }
+
+    fun searchBook(query: String): List<TextSearch.Hit> {
+        val current = book.value
+        return if (current?.format == BookFormat.PDF) {
+            val pages = _pdfPageTexts.value ?: return emptyList()
+            PdfTextSearch.search(pages, query)
+        } else {
+            TextSearch.search(_content.value.text, query)
+        }
+    }
+
+    private suspend fun refreshEncryptedPdfExtras(book: Book, password: String) {
+        val file = File(book.localPath)
+        val dir = file.parentFile ?: return
+        withContext(Dispatchers.IO) {
+            PdfOutlineParser.ensureInitialized(appContext)
+            val toc = PdfOutlineParser.parseOutline(file, 0, password)
+            if (toc.isNotEmpty()) {
+                BookImporter.saveTocForBook(appContext, book.id, toc)
+                _content.update { it.copy(toc = toc) }
+            }
+            val cover = CoverGenerator.ensureCover(
+                format = book.format,
+                localFile = file,
+                bookDir = dir,
+                title = book.title,
+                password = password
+            )
+            if (!cover.coverPath.isNullOrBlank() && cover.coverPath != book.coverPath) {
                 bookRepository.upsert(
-                    b.copy(
-                        pdfPassword = password,
-                        updatedAt = System.currentTimeMillis()
-                    )
+                    book.copy(coverPath = cover.coverPath, updatedAt = System.currentTimeMillis())
                 )
+            }
+        }
+        startPdfTextIndex(file, dir, password)
+    }
+
+    private fun startPdfTextIndex(file: File, bookDir: File?, password: String?) {
+        if (bookDir == null) return
+        pdfIndexJob?.cancel()
+        pdfIndexJob = viewModelScope.launch(Dispatchers.IO) {
+            _pdfIndexMessage.value = "正在建立文字索引…"
+            val result = runCatching {
+                val cached = if (PdfTextIndex.isUpToDate(bookDir, file)) {
+                    PdfTextIndex.loadPages(bookDir)
+                } else {
+                    null
+                }
+                cached ?: run {
+                    PdfOutlineParser.ensureInitialized(appContext)
+                    val pages = PdfTextIndex.extractAll(file, password)
+                    PdfTextIndex.writePages(bookDir, file, pages)
+                    pages
+                }
+            }
+            result.onSuccess { pages ->
+                _pdfPageTexts.value = pages
+                _pdfIndexMessage.value = null
+            }.onFailure {
+                _pdfPageTexts.value = null
+                _pdfIndexMessage.value = "暂无法搜索：需要文字层，加密文档请先解锁（不做 OCR）"
             }
         }
     }
