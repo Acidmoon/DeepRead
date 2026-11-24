@@ -1,6 +1,5 @@
 package com.vibecoding.reader.ui.bookshelf
 
-import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -63,7 +62,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -645,13 +643,7 @@ private fun FolderCoverCollage(
     paths: List<String>,
     modifier: Modifier = Modifier
 ) {
-    val bitmaps = remember(paths) {
-        paths.take(4).mapNotNull { p ->
-            runCatching {
-                BitmapFactory.decodeFile(p)?.asImageBitmap()
-            }.getOrNull()
-        }
-    }
+    val bitmaps = paths.take(4).mapNotNull { p -> rememberDecodedCover(p, maxEdge = 240) }
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
@@ -734,13 +726,7 @@ fun ShelfBookCard(
     val excerpt = remember(book.id, bookDir, book.coverPath) {
         CoverGenerator.loadExcerpt(bookDir)
     }
-    val coverBitmap = remember(coverFile?.absolutePath, coverFile?.lastModified()) {
-        coverFile?.let { file ->
-            runCatching {
-                BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
-            }.getOrNull()
-        }
-    }
+    val coverBitmap = rememberDecodedCover(coverFile?.absolutePath)
 
     Card(
         modifier = Modifier
