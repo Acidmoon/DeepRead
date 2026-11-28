@@ -48,7 +48,10 @@ import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.reader.AutoPageTurn
+import com.vibecoding.reader.domain.reader.InMemoryTextSource
 import com.vibecoding.reader.domain.reader.ReadingGestures
+import com.vibecoding.reader.domain.reader.TextSource
+import com.vibecoding.reader.domain.reader.WindowedText
 import com.vibecoding.reader.ui.common.ReadingLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -64,6 +67,8 @@ fun TextReader(
     text: String,
     toc: List<TocEntry>,
     settings: ReadingSettings,
+    textSource: TextSource? = null,
+    totalLength: Int = textSource?.totalLength ?: text.length,
     initialPosition: String,
     jumpPosition: String?,
     onJumpConsumed: () -> Unit,
@@ -99,9 +104,13 @@ fun TextReader(
         return
     }
 
+    val source = textSource ?: InMemoryTextSource(text, toc)
+    val length = if (totalLength > 0) totalLength else source.totalLength
+
     if (settings.pageTurnMode == PageTurnMode.VERTICAL) {
         VerticalScrollReader(
-            text = text,
+            source = source,
+            totalLength = length,
             toc = toc,
             settings = settings,
             initialPosition = initialPosition,
@@ -116,7 +125,8 @@ fun TextReader(
         )
     } else {
         PagedTextReader(
-            text = text,
+            source = source,
+            totalLength = length,
             toc = toc,
             settings = settings,
             initialPosition = initialPosition,
@@ -132,12 +142,37 @@ fun TextReader(
     }
 }
 
+private fun memoryWindow(source: TextSource): WindowedText? {
+    val full = source.fullText ?: return null
+    return WindowedText(full, 0, full.length, source.totalLength)
+}
+
+private suspend fun loadChapterWindow(
+    source: TextSource,
+    chapters: List<ChapterRange>,
+    index: Int
+): WindowedText {
+    memoryWindow(source)?.let { return it }
+    if (chapters.isEmpty()) {
+        return WindowedText("", 0, 0, source.totalLength)
+    }
+    val startIdx = (index - 1).coerceAtLeast(0)
+    val endIdx = (index + 1).coerceAtMost(chapters.lastIndex)
+    val start = chapters[startIdx].start
+    val end = chapters[endIdx].end
+    return withContext(Dispatchers.IO) {
+        source.readRange(start, end)
+    }
+}
+
 /**
  * 左右翻页：只对当前章分页；StaticLayout 绘制；避免巨量 pageCount 的 Pager。
+ * 窗口化 TXT 只解码当前章及前后各一章。
  */
 @Composable
 private fun PagedTextReader(
-    text: String,
+    source: TextSource,
+    totalLength: Int,
     toc: List<TocEntry>,
     settings: ReadingSettings,
     initialPosition: String,
@@ -152,8 +187,11 @@ private fun PagedTextReader(
 ) {
     val density = LocalDensity.current
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    val chapters = remember(text.length, toc) {
-        TextPaginator.buildChapters(text.length, toc)
+    val chapters = remember(totalLength, toc) {
+        TextPaginator.buildChapters(totalLength, toc)
+    }
+    var window by remember(totalLength) {
+        mutableStateOf(memoryWindow(source) ?: WindowedText("", 0, 0, totalLength))
     }
 
     var chapterIndex by remember { mutableIntStateOf(0) }
@@ -177,10 +215,12 @@ private fun PagedTextReader(
 
     suspend fun buildPages(index: Int): List<TextPageBreak> {
         val ch = chapters.getOrNull(index) ?: return emptyList()
+        val loaded = loadChapterWindow(source, chapters, index)
+        window = loaded
         textPaint.textSize = fontPx
         return withContext(Dispatchers.Default) {
-            TextPaginator.paginateChapter(
-                text = text,
+            TextPaginator.paginateChapterWindow(
+                window = loaded,
                 chapterStart = ch.start,
                 chapterEnd = ch.end,
                 widthPx = contentWidth(),
@@ -193,7 +233,8 @@ private fun PagedTextReader(
 
     // 视口 / 版式变化：按当前偏移所在章重分页
     LaunchedEffect(
-        text,
+        source,
+        totalLength,
         chapters,
         viewport.width,
         viewport.height,
@@ -203,7 +244,7 @@ private fun PagedTextReader(
         settings.verticalPaddingDp,
         bottomSafeInset
     ) {
-        if (viewport.width <= 0 || viewport.height <= 0 || text.isEmpty()) {
+        if (viewport.width <= 0 || viewport.height <= 0 || totalLength <= 0) {
             pages = emptyList()
             paginating = false
             return@LaunchedEffect
@@ -224,7 +265,7 @@ private fun PagedTextReader(
     LaunchedEffect(jumpPosition) {
         val jump = jumpPosition ?: return@LaunchedEffect
         val offset = (ReaderPosition.parse(jump) as? ReaderPosition.CharOffset)?.offset
-        if (offset != null && viewport.width > 0 && text.isNotEmpty()) {
+        if (offset != null && viewport.width > 0 && totalLength > 0) {
             paginating = true
             val chIdx = TextPaginator.chapterIndexForOffset(chapters, offset)
             chapterIndex = chIdx
@@ -236,11 +277,11 @@ private fun PagedTextReader(
         onJumpConsumed()
     }
 
-    LaunchedEffect(pageIndex, pages, text.length) {
+    LaunchedEffect(pageIndex, pages, totalLength) {
         val page = pages.getOrNull(pageIndex) ?: return@LaunchedEffect
         onProgress(
             ReaderPosition.CharOffset(page.startOffset).serialize(),
-            TextPaginator.progressForOffset(page.startOffset, text.length)
+            TextPaginator.progressForOffset(page.startOffset, totalLength)
         )
     }
 
@@ -359,9 +400,9 @@ private fun PagedTextReader(
                         )
                 ) {
                     PageTextView(
-                        text = text,
-                        startOffset = page.startOffset,
-                        endOffset = page.endOffset,
+                        text = window.text,
+                        startOffset = window.toLocal(page.startOffset),
+                        endOffset = window.toLocal(page.endOffset),
                         fontSizePx = fontPx,
                         lineSpacingMultiplier = settings.lineSpacingMultiplier,
                         textColor = Color(settings.textColor),
@@ -400,7 +441,8 @@ private fun PagedTextReader(
 @OptIn(FlowPreview::class)
 @Composable
 private fun VerticalScrollReader(
-    text: String,
+    source: TextSource,
+    totalLength: Int,
     toc: List<TocEntry>,
     settings: ReadingSettings,
     initialPosition: String,
@@ -414,8 +456,11 @@ private fun VerticalScrollReader(
     pauseAutoTurn: Boolean = false
 ) {
     val density = LocalDensity.current
-    val chapters = remember(text.length, toc) {
-        TextPaginator.buildChapters(text.length, toc)
+    val chapters = remember(totalLength, toc) {
+        TextPaginator.buildChapters(totalLength, toc)
+    }
+    var window by remember(totalLength) {
+        mutableStateOf(memoryWindow(source) ?: WindowedText("", 0, 0, totalLength))
     }
     var chapterIndex by remember {
         mutableIntStateOf(
@@ -427,9 +472,16 @@ private fun VerticalScrollReader(
     }
 
     val chapter = chapters.getOrNull(chapterIndex)
-    val blocks = remember(chapterIndex, text, chapters) {
+    LaunchedEffect(chapterIndex, chapters, source, totalLength) {
+        window = loadChapterWindow(source, chapters, chapterIndex)
+    }
+    val blocks = remember(chapterIndex, window, chapters) {
         val ch = chapters.getOrNull(chapterIndex) ?: return@remember emptyList()
-        TextPaginator.splitBlocks(text, ch.start, ch.end)
+        if (!window.contains(ch.start, ch.end) && memoryWindow(source) == null) {
+            return@remember emptyList()
+        }
+        val w = memoryWindow(source) ?: window
+        TextPaginator.splitBlocksWindow(w, ch.start, ch.end)
     }
 
     val listState = rememberLazyListState()
@@ -456,7 +508,7 @@ private fun VerticalScrollReader(
         onJumpConsumed()
     }
 
-    LaunchedEffect(listState, blocks, text.length, chapterIndex) {
+    LaunchedEffect(listState, blocks, totalLength, chapterIndex) {
         snapshotFlow {
             val info = listState.layoutInfo.visibleItemsInfo.firstOrNull()
             val block = info?.index?.let { blocks.getOrNull(it) }
@@ -467,7 +519,7 @@ private fun VerticalScrollReader(
             .collect { offset ->
                 onProgress(
                     ReaderPosition.CharOffset(offset).serialize(),
-                    TextPaginator.progressForOffset(offset, text.length)
+                    TextPaginator.progressForOffset(offset, totalLength)
                 )
             }
     }

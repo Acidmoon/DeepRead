@@ -52,12 +52,13 @@ object TxtParser {
     )
 
     /** 章级候选的标记类型，用于全书多数决筛选 */
-    private enum class ChapterMarker { ZHANG, HUI, JIE, EN }
+    internal enum class ChapterMarker { ZHANG, HUI, JIE, EN }
 
-    private data class Heading(
+    internal data class HeadingCandidate(
         val kind: TocKind,
         val title: String,
-        val offset: Int,
+        val charOffset: Int,
+        val byteOffset: Long = 0L,
         /** null 表示卷级标题 */
         val marker: ChapterMarker?
     )
@@ -107,7 +108,7 @@ object TxtParser {
     fun buildToc(text: String, maxEntries: Int = 20_000): List<TocEntry> {
         if (text.isEmpty()) return emptyList()
 
-        val headings = ArrayList<Heading>(256)
+        val headings = ArrayList<HeadingCandidate>(256)
         var offset = 0
         // 避免 split 整本产生巨量中间列表：按行扫描
         var i = 0
@@ -120,10 +121,10 @@ object TxtParser {
 
             if (trimmed.isNotEmpty()) {
                 classifyHeadingFull(trimmed)?.let { (kind, marker) ->
-                    headings += Heading(
+                    headings += HeadingCandidate(
                         kind = kind,
                         title = trimmed.take(80),
-                        offset = offset,
+                        charOffset = offset,
                         marker = marker
                     )
                 }
@@ -134,11 +135,23 @@ object TxtParser {
             i = nl + 1
         }
 
+        return finalizeHeadings(headings, maxEntries).map { it.toTocEntry() }
+    }
+
+    /**
+     * 主章节多数决，并把卷/章层级写成与 [buildToc] 相同的目录项中间结果。
+     * 供全文扫描和流式索引共用，避免为了目录再把全书读成 String。
+     */
+    internal fun finalizeHeadings(
+        headings: List<HeadingCandidate>,
+        maxEntries: Int = 20_000
+    ): List<TxtHeading> {
         if (headings.isEmpty()) return emptyList()
+        val limited = if (headings.size <= maxEntries) headings else headings.take(maxEntries)
 
         // 主章节多数决：章/回/节出现最多的标记才算章节（≥2 次才启用筛选，
         // 否则可能是误识别，全部保留交给后面的层级逻辑）
-        val dominant = headings.mapNotNull { it.marker }
+        val dominant = limited.mapNotNull { it.marker }
             .filter { it != ChapterMarker.EN }
             .groupingBy { it }
             .eachCount()
@@ -146,7 +159,7 @@ object TxtParser {
             ?.takeIf { it.value >= 2 }
             ?.key
 
-        val raw = headings.filter { h ->
+        val raw = limited.filter { h ->
             h.kind == TocKind.VOLUME ||
                 h.marker == ChapterMarker.EN ||
                 dominant == null ||
@@ -162,9 +175,10 @@ object TxtParser {
                 h.kind == TocKind.VOLUME -> 0
                 else -> 1
             }
-            TocEntry(
+            TxtHeading(
                 title = h.title,
-                position = ReaderPosition.CharOffset(h.offset).serialize(),
+                charOffset = h.charOffset,
+                byteOffset = h.byteOffset,
                 level = level,
                 kind = h.kind
             )
@@ -175,7 +189,7 @@ object TxtParser {
      * 单行标题分类（含候选章标记）：供 [buildToc] 多数决使用。
      * @return 类型与章标记（卷时标记为 null）
      */
-    private fun classifyHeadingFull(line: String): Pair<TocKind, ChapterMarker?>? {
+    internal fun classifyHeadingFull(line: String): Pair<TocKind, ChapterMarker?>? {
         // 过长几乎不可能是目录标题
         if (line.length > 100) return null
 

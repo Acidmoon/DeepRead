@@ -16,12 +16,15 @@ object EbookLoader {
         val dir = bookDir ?: file.parentFile
         return when (format) {
             BookFormat.TXT -> {
-                val text = TxtParser.readText(file)
+                val source = TxtDocuments.open(file, dir)
+                val full = source.fullText
                 EbookDocument(
-                    plainText = text,
-                    toc = TxtParser.buildToc(text),
+                    // 大文件不把全书放进 plainText，避免阅读器/封面再次整本驻留
+                    plainText = full.orEmpty(),
+                    toc = source.toc,
                     // 本地副本常为 original.txt，书名由导入时的显示名决定，这里不从文件名取
-                    title = null
+                    title = null,
+                    totalLength = source.totalLength
                 )
             }
             BookFormat.MD -> MarkdownParser.parseFile(file)

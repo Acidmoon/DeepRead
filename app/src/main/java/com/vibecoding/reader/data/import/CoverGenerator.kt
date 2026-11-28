@@ -15,6 +15,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.vibecoding.reader.data.parser.EbookLoader
+import com.vibecoding.reader.data.parser.TxtDocuments
 import com.vibecoding.reader.data.parser.EpubParser
 import com.vibecoding.reader.domain.model.BookFormat
 import java.io.File
@@ -98,7 +99,12 @@ object CoverGenerator {
             }
             BookFormat.TXT, BookFormat.MD, BookFormat.DOCX -> {
                 val text = runCatching {
-                    EbookLoader.load(format, localFile).plainText
+                    if (format == BookFormat.TXT) {
+                        // 封面只需前几段，不要为摘录再把全书读进内存
+                        TxtDocuments.readPrefix(localFile, 2048)
+                    } else {
+                        EbookLoader.load(format, localFile).plainText
+                    }
                 }.getOrDefault("")
                 textStyleCover(title, text, cover, excerptOut, format)
             }

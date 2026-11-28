@@ -53,9 +53,27 @@ class BookLoadGuardTest {
     }
 
     @Test
-    fun precheckLargeEbookRejected() {
+    fun precheckLargeTxtAllowed() {
+        // TXT 已窗口化，超过 64MB 仍可打开（但会提示大文件）
         val f = sparseFile(".txt", BookLoadGuard.HARD_LIMIT_BYTES + 1)
+        assertNull(BookLoadGuard.precheck(f, BookFormat.TXT))
+        assertTrue(BookLoadGuard.isLarge(f.length()))
+        f.delete()
+    }
+
+    @Test
+    fun precheckHugeTxtRejected() {
+        val f = sparseFile(".txt", BookLoadGuard.TXT_HARD_LIMIT_BYTES + 1)
         val err = BookLoadGuard.precheck(f, BookFormat.TXT)
+        assertNotNull(err)
+        assertTrue(err!!.contains("过大"))
+        f.delete()
+    }
+
+    @Test
+    fun precheckLargeEbookRejected() {
+        val f = sparseFile(".epub", BookLoadGuard.HARD_LIMIT_BYTES + 1)
+        val err = BookLoadGuard.precheck(f, BookFormat.EPUB)
         assertNotNull(err)
         assertTrue(err!!.contains("过大"))
         f.delete()
