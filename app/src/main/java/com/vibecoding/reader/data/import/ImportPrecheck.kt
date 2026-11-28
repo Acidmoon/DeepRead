@@ -61,9 +61,7 @@ object ImportPrecheck {
         return null
     }
 
-    fun limitFor(format: BookFormat): Long =
-        if (format == BookFormat.PDF) BookLoadGuard.PDF_HARD_LIMIT_BYTES
-        else BookLoadGuard.HARD_LIMIT_BYTES
+    fun limitFor(format: BookFormat): Long = BookLoadGuard.hardLimitBytes(format)
 
     fun spaceError(
         neededBytes: Long,

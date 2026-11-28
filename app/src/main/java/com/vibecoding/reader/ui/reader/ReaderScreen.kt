@@ -204,12 +204,7 @@ fun ReaderScreen(
             snackMsg = "暂无位置可收藏"
             return
         }
-        val label = when (val p = ReaderPosition.parse(pos)) {
-            is ReaderPosition.CharOffset -> viewModel.excerptForText(p.offset)
-            is ReaderPosition.PageIndex -> "第 ${p.page + 1} 页"
-            null -> "书签"
-        }
-        viewModel.addBookmark(pos, label)
+        viewModel.addBookmarkAt(pos)
         snackMsg = "已添加书签"
     }
 
@@ -283,6 +278,8 @@ fun ReaderScreen(
                                     TextReader(
                                         text = content.text,
                                         toc = content.toc,
+                                        textSource = content.textSource,
+                                        totalLength = content.totalLength,
                                         settings = settings,
                                         initialPosition = content.initialPosition,
                                         jumpPosition = jumpPosition,
@@ -337,7 +334,7 @@ fun ReaderScreen(
                                 .zIndex(2f)
                         ) {
                             val isEbook = book!!.format.isEbook
-                            val textLen = content.text.length
+                            val textLen = content.totalLength
                             val canSeekEbook = isEbook && textLen > 0
                             val canSeekPdf = book!!.format == BookFormat.PDF && pdfPageCount > 0
                             ReaderTopChrome(

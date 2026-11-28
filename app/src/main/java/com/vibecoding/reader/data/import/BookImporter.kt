@@ -11,6 +11,7 @@ import com.vibecoding.reader.data.parser.ImagePathResolver
 import com.vibecoding.reader.data.parser.SafeLocalPath
 import com.vibecoding.reader.data.secure.PdfPasswordAccess
 import com.vibecoding.reader.data.parser.PdfOutlineParser
+import com.vibecoding.reader.data.parser.TxtDocuments
 import com.vibecoding.reader.data.parser.TxtParser
 import com.vibecoding.reader.data.repo.BookRepository
 import com.vibecoding.reader.data.repo.FolderRepository
@@ -231,6 +232,10 @@ class BookImporter(
                     }
                     author = parsed.document.author
                     parsed.document.toc
+                }
+                format == BookFormat.TXT -> {
+                    // 大 TXT 在此流式建索引并写入书籍目录 sidecar，不把全书读进内存
+                    TxtDocuments.open(dest, dir).toc
                 }
                 format.isEbook -> {
                     val doc = EbookLoader.load(format, dest, dir)

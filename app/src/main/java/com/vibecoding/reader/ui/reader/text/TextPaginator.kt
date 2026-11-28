@@ -4,6 +4,7 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.vibecoding.reader.domain.reader.WindowedText
 import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.TocEntry
 import kotlin.math.max
@@ -197,6 +198,36 @@ object TextPaginator {
     /**
      * 对章节 [chapterStart, chapterEnd) 做完整分页，只返回偏移列表。
      */
+    /**
+     * 对窗口内的章节区间分页，返回全书绝对偏移的页列表。
+     */
+    fun paginateChapterWindow(
+        window: WindowedText,
+        chapterStart: Int,
+        chapterEnd: Int,
+        widthPx: Int,
+        heightPx: Int,
+        paint: TextPaint,
+        lineSpacingMultiplier: Float
+    ): List<TextPageBreak> {
+        val localStart = window.toLocal(chapterStart)
+        val localEnd = window.toLocal(chapterEnd).coerceAtLeast(localStart)
+        return paginateChapter(
+            text = window.text,
+            chapterStart = localStart,
+            chapterEnd = localEnd,
+            widthPx = widthPx,
+            heightPx = heightPx,
+            paint = paint,
+            lineSpacingMultiplier = lineSpacingMultiplier
+        ).map { page ->
+            TextPageBreak(
+                startOffset = page.startOffset + window.startOffset,
+                endOffset = page.endOffset + window.startOffset
+            )
+        }
+    }
+
     fun paginateChapter(
         text: CharSequence,
         chapterStart: Int,
@@ -250,6 +281,23 @@ object TextPaginator {
     fun progressForOffset(offset: Int, textLength: Int): Float {
         if (textLength <= 0) return 0f
         return min(1f, offset.toFloat() / textLength.toFloat())
+    }
+
+    /** 将窗口内的章节拆成段落块，块偏移为全书绝对字符位置。 */
+    fun splitBlocksWindow(
+        window: WindowedText,
+        chapterStart: Int,
+        chapterEnd: Int,
+        targetBlockChars: Int = 1200
+    ): List<TextBlock> {
+        val localStart = window.toLocal(chapterStart)
+        val localEnd = window.toLocal(chapterEnd).coerceAtLeast(localStart)
+        return splitBlocks(window.text, localStart, localEnd, targetBlockChars).map { block ->
+            block.copy(
+                startOffset = block.startOffset + window.startOffset,
+                endOffset = block.endOffset + window.startOffset
+            )
+        }
     }
 
     /** 将长文拆成段落块，供上下滚动 LazyColumn 使用（避免单 Composable 持有整章超大 Text）。 */

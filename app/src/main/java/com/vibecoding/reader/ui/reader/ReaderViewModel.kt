@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.vibecoding.reader.data.import.BookImporter
 import com.vibecoding.reader.data.import.CoverGenerator
 import com.vibecoding.reader.data.parser.EbookLoader
+import com.vibecoding.reader.data.parser.TxtDocuments
+import com.vibecoding.reader.domain.reader.InMemoryTextSource
+import com.vibecoding.reader.domain.reader.TextSource
 import com.vibecoding.reader.data.parser.PdfOutlineParser
 import com.vibecoding.reader.data.parser.PdfTextIndex
 import com.vibecoding.reader.data.secure.PdfPasswordAccess
@@ -20,6 +23,7 @@ import com.vibecoding.reader.domain.model.Book
 import com.vibecoding.reader.domain.model.BookFormat
 import com.vibecoding.reader.domain.model.Bookmark
 import com.vibecoding.reader.domain.model.EbookBlock
+import com.vibecoding.reader.domain.model.ReaderPosition
 import com.vibecoding.reader.domain.model.ReadingSettings
 import com.vibecoding.reader.domain.model.TocEntry
 import com.vibecoding.reader.domain.reader.BookLoadGuard
@@ -50,7 +54,11 @@ data class ReaderContentState(
     val initialPosition: String = "",
     val markdownSource: String? = null,
     /** 富内容（标题/段落/图片等） */
-    val blocks: List<EbookBlock> = emptyList()
+    val blocks: List<EbookBlock> = emptyList(),
+    /** TXT 窗口化文本源；其它电子书为内存实现 */
+    val textSource: TextSource? = null,
+    /** 规范化正文总长度，窗口化时 [text] 可能为空 */
+    val totalLength: Int = 0
 )
 
 class ReaderViewModel(
@@ -141,29 +149,53 @@ class ReaderViewModel(
                     when {
                         book.format.isEbook -> {
                             val bookDir = file.parentFile
-                            val doc = EbookLoader.load(book.format, file, bookDir)
-                            val toc = cachedToc.ifEmpty {
-                                doc.toc.also {
-                                    BookImporter.saveTocForBook(appContext, book.id, it)
+                            if (book.format == BookFormat.TXT) {
+                                val source = TxtDocuments.open(file, bookDir)
+                                val toc = cachedToc.ifEmpty {
+                                    source.toc.also {
+                                        BookImporter.saveTocForBook(appContext, book.id, it)
+                                    }
                                 }
-                            }
-                            val metaTitle = doc.title?.trim().orEmpty()
-                            val betterTitle = metaTitle.isNotBlank() &&
-                                !metaTitle.equals("original", ignoreCase = true) &&
-                                (book.title.equals("original", ignoreCase = true) ||
-                                    book.title == "未命名文档")
-                            if (betterTitle ||
-                                (!doc.author.isNullOrBlank() && book.author.isNullOrBlank())
-                            ) {
-                                bookRepository.upsert(
-                                    book.copy(
-                                        title = if (betterTitle) metaTitle else book.title,
-                                        author = doc.author ?: book.author,
-                                        updatedAt = System.currentTimeMillis()
+                                LoadedContent(
+                                    text = source.fullText.orEmpty(),
+                                    toc = toc,
+                                    markdownSource = null,
+                                    blocks = emptyList(),
+                                    textSource = source,
+                                    totalLength = source.totalLength
+                                )
+                            } else {
+                                val doc = EbookLoader.load(book.format, file, bookDir)
+                                val toc = cachedToc.ifEmpty {
+                                    doc.toc.also {
+                                        BookImporter.saveTocForBook(appContext, book.id, it)
+                                    }
+                                }
+                                val metaTitle = doc.title?.trim().orEmpty()
+                                val betterTitle = metaTitle.isNotBlank() &&
+                                    !metaTitle.equals("original", ignoreCase = true) &&
+                                    (book.title.equals("original", ignoreCase = true) ||
+                                        book.title == "未命名文档")
+                                if (betterTitle ||
+                                    (!doc.author.isNullOrBlank() && book.author.isNullOrBlank())
+                                ) {
+                                    bookRepository.upsert(
+                                        book.copy(
+                                            title = if (betterTitle) metaTitle else book.title,
+                                            author = doc.author ?: book.author,
+                                            updatedAt = System.currentTimeMillis()
+                                        )
                                     )
+                                }
+                                LoadedContent(
+                                    text = doc.plainText,
+                                    toc = toc,
+                                    markdownSource = doc.markdownSource,
+                                    blocks = doc.blocks,
+                                    textSource = InMemoryTextSource(doc.plainText, toc),
+                                    totalLength = doc.totalLength
                                 )
                             }
-                            LoadedContent(doc.plainText, toc, doc.markdownSource, doc.blocks)
                         }
                         book.format == BookFormat.PDF -> {
                             // PDF 正文由 PdfRenderer 渲染；此处仅元数据/目录，避免整本读入
@@ -181,7 +213,7 @@ class ReaderViewModel(
                                     BookImporter.saveTocForBook(appContext, book.id, it)
                                 }
                             }
-                            LoadedContent("", toc, null, emptyList())
+                            LoadedContent("", toc, null, emptyList(), textSource = null, totalLength = 0)
                         }
                         else -> error("不支持的格式")
                     }
@@ -204,7 +236,9 @@ class ReaderViewModel(
                     toc = loaded.toc,
                     initialPosition = book.lastPosition,
                     markdownSource = loaded.markdownSource,
-                    blocks = loaded.blocks
+                    blocks = loaded.blocks,
+                    textSource = loaded.textSource,
+                    totalLength = loaded.totalLength
                 )
             }
             if (book.format == BookFormat.PDF) {
@@ -271,7 +305,13 @@ class ReaderViewModel(
             val pages = _pdfPageTexts.value ?: return emptyList()
             PdfTextSearch.search(pages, query)
         } else {
-            TextSearch.search(_content.value.text, query)
+            val state = _content.value
+            val source = state.textSource
+            if (source != null) {
+                TextSearch.search(source, query)
+            } else {
+                TextSearch.search(state.text, query)
+            }
         }
     }
 
@@ -369,18 +409,44 @@ class ReaderViewModel(
     }
 
     fun excerptForText(offset: Int, maxLen: Int = 40): String {
-        val text = _content.value.text
+        val state = _content.value
+        val source = state.textSource
+        if (source != null && source.totalLength > 0) {
+            val start = offset.coerceIn(0, source.totalLength)
+            val end = (start + maxLen).coerceAtMost(source.totalLength)
+            if (start >= end) return "书签"
+            return source.readRange(start, end).text.replace('\n', ' ').trim().ifBlank { "书签" }
+        }
+        val text = state.text
         if (text.isEmpty()) return "书签"
         val start = offset.coerceIn(0, text.length)
         val end = (start + maxLen).coerceAtMost(text.length)
         return text.substring(start, end).replace('\n', ' ').trim().ifBlank { "书签" }
     }
 
+    /**
+     * 在 IO 上生成书签摘要后写入，避免窗口化 TXT 在主线程读文件。
+     */
+    fun addBookmarkAt(position: String) {
+        viewModelScope.launch {
+            val label = withContext(Dispatchers.IO) {
+                when (val parsed = ReaderPosition.parse(position)) {
+                    is ReaderPosition.CharOffset -> excerptForText(parsed.offset)
+                    is ReaderPosition.PageIndex -> "第 ${parsed.page + 1} 页"
+                    null -> "书签"
+                }
+            }
+            addBookmark(position, label)
+        }
+    }
+
     private data class LoadedContent(
         val text: String,
         val toc: List<TocEntry>,
         val markdownSource: String?,
-        val blocks: List<EbookBlock>
+        val blocks: List<EbookBlock>,
+        val textSource: TextSource?,
+        val totalLength: Int
     )
 
     class Factory(

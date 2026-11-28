@@ -9,7 +9,8 @@ import java.util.concurrent.TimeoutException
 /**
  * 大文件 / 损坏文件加载策略与错误文案（纯逻辑，可单测）。
  *
- * 电子书（TXT/MD/EPUB/DOCX）需整本读入内存重排，受 [HARD_LIMIT_BYTES] 限制；
+ * MD / EPUB / DOCX 仍需整本读入内存重排，受 [HARD_LIMIT_BYTES] 限制；
+ * TXT 已按章窗口化（流式索引，不整本解码），适用 [TXT_HARD_LIMIT_BYTES]；
  * PDF 按页流式渲染（系统 PdfRenderer / PdfBox 都是随用随取，不整本入内存），
  * 适用宽松得多的 [PDF_HARD_LIMIT_BYTES]。
  */
@@ -17,8 +18,14 @@ object BookLoadGuard {
     /** 超过此大小显示“大文件加载中”提示 */
     const val LARGE_WARN_BYTES: Long = 8L * 1024 * 1024
 
-    /** 电子书超过此大小拒绝整本读入内存（防 OOM） */
+    /** MD / EPUB / DOCX 超过此大小拒绝整本读入内存（防 OOM） */
     const val HARD_LIMIT_BYTES: Long = 64L * 1024 * 1024
+
+    /**
+     * TXT 流式索引后的体积上限，仅防御极端异常文件。
+     * 打开 11MB 级小说不再受 64MB 整本内存上限约束。
+     */
+    const val TXT_HARD_LIMIT_BYTES: Long = 2L * 1024 * 1024 * 1024
 
     /** PDF 按页渲染，上限仅防御极端异常文件 */
     const val PDF_HARD_LIMIT_BYTES: Long = 2L * 1024 * 1024 * 1024
@@ -31,6 +38,15 @@ object BookLoadGuard {
     fun isLarge(bytes: Long): Boolean = bytes >= LARGE_WARN_BYTES
 
     fun exceedsHardLimit(bytes: Long): Boolean = bytes > HARD_LIMIT_BYTES
+
+    fun hardLimitBytes(format: BookFormat?): Long = when (format) {
+        BookFormat.TXT -> TXT_HARD_LIMIT_BYTES
+        BookFormat.PDF -> PDF_HARD_LIMIT_BYTES
+        else -> HARD_LIMIT_BYTES
+    }
+
+    fun exceedsHardLimit(bytes: Long, format: BookFormat?): Boolean =
+        bytes > hardLimitBytes(format)
 
     fun loadingMessage(bytes: Long): String {
         return if (isLarge(bytes)) {
@@ -71,13 +87,13 @@ object BookLoadGuard {
         return String.format(Locale.US, "%.1fMB", mb)
     }
 
-    /** 打开前预检：返回错误文案；null 表示可继续。PDF 按页流式渲染，适用独立上限 */
+    /** 打开前预检：返回错误文案；null 表示可继续。TXT / PDF 走流式策略，适用独立上限 */
     fun precheck(file: File, format: BookFormat? = null): String? {
         if (!file.exists()) return "本地文件丢失，请重新导入"
         if (!file.isFile) return "路径不是有效文件"
         val size = file.length()
         if (size <= 0L) return "文件为空或无法读取"
-        val limit = if (format == BookFormat.PDF) PDF_HARD_LIMIT_BYTES else HARD_LIMIT_BYTES
+        val limit = hardLimitBytes(format)
         if (size > limit) return hardLimitMessage(size, limit)
         return null
     }

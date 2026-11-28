@@ -193,7 +193,11 @@ data class EbookDocument(
     val title: String? = null,
     val author: String? = null,
     val markdownSource: String? = null,
-    val blocks: List<EbookBlock> = emptyList()
+    val blocks: List<EbookBlock> = emptyList(),
+    /**
+     * 规范化正文总长度。TXT 窗口化时 [plainText] 可能为空，进度与书签仍以该长度为准。
+     */
+    val totalLength: Int = plainText.length
 ) {
     val hasImages: Boolean get() = blocks.any { it is EbookBlock.Image }
 }

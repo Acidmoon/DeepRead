@@ -31,8 +31,14 @@ class ImportPrecheckTest {
 
     @Test
     fun sizeErrorKnownEbookAndPdf() {
-        assertNotNull(
+        assertNull(
             ImportPrecheck.sizeError(BookLoadGuard.HARD_LIMIT_BYTES + 1, BookFormat.TXT)
+        )
+        assertNotNull(
+            ImportPrecheck.sizeError(BookLoadGuard.HARD_LIMIT_BYTES + 1, BookFormat.EPUB)
+        )
+        assertNotNull(
+            ImportPrecheck.sizeError(BookLoadGuard.TXT_HARD_LIMIT_BYTES + 1, BookFormat.TXT)
         )
         assertNull(
             ImportPrecheck.sizeError(BookLoadGuard.HARD_LIMIT_BYTES + 1, BookFormat.PDF)
